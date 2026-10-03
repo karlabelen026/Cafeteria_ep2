@@ -13,6 +13,10 @@ on:
         description: "Rama que la EC2 clona y corre con docker compose"
         required: false
         default: "deploy"
+      replace_target:
+        description: "Opcional: direccion de un recurso para forzar su reemplazo (ej. aws_instance.backend), para probar un boot limpio sin perder datos (el volumen EBS de MySQL no es parte de la instancia)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -51,7 +55,12 @@ jobs:
         run: terraform fmt -check
 
       - name: terraform plan
-        run: terraform plan -input=false -out=tfplan
+        run: |
+          if [ -n "${{ github.event.inputs.replace_target }}" ]; then
+            terraform plan -input=false -replace="${{ github.event.inputs.replace_target }}" -out=tfplan
+          else
+            terraform plan -input=false -out=tfplan
+          fi
         env:
           TF_VAR_my_ip_cidr: ${{ secrets.MY_IP_CIDR }}
           TF_VAR_repo_url: https://github.com/${{ github.repository }}.git

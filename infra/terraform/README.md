@@ -116,7 +116,7 @@ real sin que nadie lo pidiera.
 
 | Workflow | Qué hace |
 |---|---|
-| `terraform-deploy.yml` | `terraform plan` + `apply` contra AWS. Pide confirmar la rama que la EC2 va a clonar (`repo_branch`, por defecto `deploy`). Publica los outputs (IP, URLs) en el resumen del job. |
+| `terraform-deploy.yml` | `terraform plan` + `apply` contra AWS. Pide confirmar la rama que la EC2 va a clonar (`repo_branch`, por defecto `deploy`) y, opcionalmente, `replace_target` (ej. `aws_instance.backend`) para forzar el reemplazo de un recurso puntual sin tocar el resto. Publica los outputs (IP, URLs) en el resumen del job. |
 | `terraform-destroy.yml` | `terraform destroy`. Pide escribir literalmente `destruir` en el input `confirmar` para evitar un click accidental. |
 
 ### Cómo correrlos
