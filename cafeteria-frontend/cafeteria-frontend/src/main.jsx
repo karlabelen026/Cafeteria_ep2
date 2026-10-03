@@ -32,7 +32,21 @@ async function bootstrap() {
 
     const msalInstance = new PublicClientApplication(msalConfig);
 
-    if (!msalInstance.getActiveAccount() && msalInstance.getAllAccounts().length > 0) {
+    // msal-browser v3 exige initialize() antes de cualquier otro metodo. Sin
+    // esto (y sin el handleRedirectPromise de abajo), la pagina se pintaba
+    // antes de que MSAL alcanzara a procesar la vuelta del redirect de Azure:
+    // la sesion quedaba "a medias" hasta la siguiente recarga manual.
+    await msalInstance.initialize();
+
+    const result = await msalInstance.handleRedirectPromise().catch((e) => {
+      window.__msalError = e;
+      console.error('MSAL redirect error', e);
+      return null;
+    });
+
+    if (result?.account) {
+      msalInstance.setActiveAccount(result.account);
+    } else if (!msalInstance.getActiveAccount() && msalInstance.getAllAccounts().length > 0) {
       msalInstance.setActiveAccount(msalInstance.getAllAccounts()[0]);
     }
 
