@@ -2,7 +2,7 @@ spring:
   application:
     name: ms-clientes
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/cafeteria}
+    url: ${DB_URL:jdbc:mysql://localhost:3306/cafeteria?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC}
     username: ${DB_USER:cafeteria}
     password: ${DB_PASSWORD:cafeteria}
   jpa:

@@ -75,7 +75,7 @@ variable "azure_authority" {
 }
 
 variable "db_password" {
-  description = "Password de Postgres (usuario fijo \"cafeteria\")."
+  description = "Password de MySQL (usuario fijo \"cafeteria\")."
   type        = string
   sensitive   = true
 }

@@ -29,7 +29,7 @@ systemctl enable docker
 systemctl start docker
 usermod -aG docker ubuntu
 
-# ── Swap de 4 GB: la t3.large compila/corre 11 JVM + Postgres + 3 nodos
+# ── Swap de 4 GB: la t3.large compila/corre 11 JVM + MySQL + 3 nodos
 # RabbitMQ; sin swap el OOM killer mata procesos durante el primer
 # "docker compose build" (ver docs/EP2_PLAN.md sección 8.1). ─────────────────
 if [ ! -f /swapfile ]; then

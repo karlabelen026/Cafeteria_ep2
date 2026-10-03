@@ -3,7 +3,7 @@
 Sistema de gestión para una cafetería (menú, inventario, pedidos, clientes, pagos,
 empleados, proveedores y reportes) que hoy funciona en papel. Arquitectura:
 React + MSAL → Azure Entra ID (IDaaS) → AWS API Gateway → BFF (Spring Cloud
-Gateway) → 8 microservicios Spring Boot → PostgreSQL.
+Gateway) → 8 microservicios Spring Boot → MySQL.
 
 > **Nota:** el enunciado y la pauta del EP1 piden explícitamente Angular. El
 > cambio a React se hizo porque el estudiante confirmó por escrito con el
@@ -28,8 +28,8 @@ Gateway) → 8 microservicios Spring Boot → PostgreSQL.
   `@EnableWebFluxSecurity`, ver `config/SecurityConfig.java`).
 - **Los 8 microservicios:** Spring MVC clásico (`spring-boot-starter-web`,
   servlet, no reactivo) + **Spring Data JPA/Hibernate**
-  (`spring-boot-starter-data-jpa`) contra PostgreSQL (driver
-  `org.postgresql:postgresql`), cada uno con su propio
+  (`spring-boot-starter-data-jpa`) contra MySQL (driver
+  `com.mysql:mysql-connector-j`), cada uno con su propio
   `@RestController` / `@Entity` / `@Repository` en su propio paquete. Cada
   uno valida el mismo JWT **de forma independiente** del BFF
   (`spring-boot-starter-oauth2-resource-server` + `HttpSecurity` /
@@ -44,10 +44,10 @@ Gateway) → 8 microservicios Spring Boot → PostgreSQL.
 - **Frontend:** **React 18.3 + Vite 5.4**, `@azure/msal-browser` 3.20 +
   `@azure/msal-react` 2.1 (login, manejo de tokens y su cache) y
   `react-router-dom` 6.26 (rutas y el guard `ProtectedRoute`).
-- **Base de datos:** PostgreSQL 16 (`postgres:16-alpine` en Docker), un
-  esquema por microservicio dentro de la misma base
-  (`init-db/01-schemas.sql`). En modo `noauth` cada microservicio usa su
-  propia base **H2** embebida en su lugar (sin Postgres).
+- **Base de datos:** MySQL 8 (`mysql:8.4` en Docker), una base por
+  microservicio dentro del mismo servidor (`CREATE SCHEMA` = `CREATE DATABASE`
+  en MySQL, ver `init-db/01-schemas.sql`). En modo `noauth` cada microservicio
+  usa su propia base **H2** embebida en su lugar (sin MySQL).
 - **Contenedores:** los 9 módulos backend comparten un único `Dockerfile`
   multi-stage (build con Maven + JDK 17, runtime con JRE 17 Alpine),
   parametrizado por `build.args.MODULE` para compilar solo el módulo que
@@ -87,9 +87,9 @@ probar un microservicio aislado con `curl`), no porque el frontend los use.
 
 **Modos de ejecución:**
 - `noauth` (default en Docker): sin Azure, JWT sin validar, cada microservicio con su propia H2 embebida — para demos rápidas.
-- Azure real: valida JWT contra tu Tenant, usa Postgres compartido con un esquema por microservicio.
+- Azure real: valida JWT contra tu Tenant, usa MySQL compartido con una base por microservicio.
 
-**Infraestructura:** todo dockerizado (`docker-compose.yml` en la raíz — Postgres + 8 microservicios + BFF + frontend con un solo `docker compose up --build -d`), y con un despliegue de referencia corriendo en una instancia EC2 (nginx como proxy con SSL autofirmado, ver sección 9).
+**Infraestructura:** todo dockerizado (`docker-compose.yml` en la raíz — MySQL + 8 microservicios + BFF + frontend con un solo `docker compose up --build -d`), y con un despliegue de referencia corriendo en una instancia EC2 (nginx como proxy con SSL autofirmado, ver sección 9).
 
 ---
 
@@ -110,7 +110,7 @@ la versión rápida de eso.
 
 ## 1. Correrlo AHORA MISMO con Docker (la forma más rápida y confiable)
 
-Todo el stack (Postgres + 8 microservicios + BFF + frontend) está dockerizado
+Todo el stack (MySQL + 8 microservicios + BFF + frontend) está dockerizado
 y por defecto corre en modo `noauth` (sin Azure configurado todavía, JWT sin
 validar) — es la forma más rápida de dejarlo funcionando en un computador
 nuevo, por ejemplo el del instituto.
@@ -128,7 +128,7 @@ módulos Maven + el frontend). Cuando termine:
 - Frontend: http://localhost:4200
 - BFF: http://localhost:8080/api/productos
 - Cada microservicio también queda expuesto individualmente (8081-8088) y
-  Postgres en 5432, aunque en modo `noauth` no se usa (cada microservicio usa
+  MySQL en 3306, aunque en modo `noauth` no se usa (cada microservicio usa
   su propia base H2 embebida, persistida en un volumen Docker).
 
 Comandos útiles:
@@ -260,15 +260,15 @@ FRONTEND_CLIENT_ID   = ...
 
 ---
 
-## 5. Backend local con Azure real (Postgres, sin `noauth`)
+## 5. Backend local con Azure real (MySQL, sin `noauth`)
 
 ### 5.1 Base de datos
 ```bash
-cd cafeteria-backend/cafeteria-backend
-docker compose up -d postgres
+# parado en la raíz del repo (donde está docker-compose.yml)
+docker compose up -d mysql
 ```
-Levanta PostgreSQL en `localhost:5432` (usuario/clave `cafeteria`/`cafeteria`)
-con un esquema separado por microservicio (`init-db/01-schemas.sql`).
+Levanta MySQL en `localhost:3306` (usuario/clave `cafeteria`/`cafeteria`)
+con una base separada por microservicio (`init-db/01-schemas.sql`).
 
 ### 5.2 Variables de entorno
 ```bash
@@ -307,7 +307,7 @@ llamadas al BFF llevan el token adjunto automáticamente (hook `useApiClient`,
 
 El `docker-compose.yml` de la raíz define:
 
-- `postgres` — base para el modo con Azure real (sección 5).
+- `mysql` — base para el modo con Azure real (sección 5).
 - `ms-productos` … `ms-reportes` (8) y `bff-gateway` — cada uno se construye
   con [cafeteria-backend/cafeteria-backend/Dockerfile](cafeteria-backend/cafeteria-backend/Dockerfile)
   (multi-stage: compila con Maven, corre con JRE Alpine), parametrizado por
@@ -373,7 +373,7 @@ deseable, no bloqueante. Si te sobra tiempo, la versión mínima es:
    clonado) — o, sin Docker, instala Java 17 y copia los `.jar` generados por
    `mvn package` de cada microservicio y del BFF (`java -jar nombre.jar`, con
    `nohup ... &` o systemd). Abre en el Security Group los puertos 8080-8088.
-2. **RDS**: crea una instancia PostgreSQL (free tier), y cambia `DB_URL`,
+2. **RDS**: crea una instancia MySQL (free tier), y cambia `DB_URL`,
    `DB_USER`, `DB_PASSWORD` como variables de entorno en la EC2 apuntando a esa
    RDS en vez de a tu Docker local.
 3. **AWS API Gateway**: crea un HTTP API con una ruta `ANY /{proxy+}` que
@@ -421,15 +421,14 @@ para que la IP pública quede fija.
 ## 10. Estructura del repositorio
 
 ```
-docker-compose.yml            # stack completo: postgres + 8 ms + bff + frontend
+docker-compose.yml            # stack completo: mysql + 8 ms + bff + frontend
 
 cafeteria-backend/cafeteria-backend/
   pom.xml                     # padre Maven multi-modulo (fix: repackage bindeado en package)
   Dockerfile                  # generico, parametrizado por build-arg MODULE
   ms-productos/ ... ms-reportes/   # 8 microservicios (mismo patron cada uno)
   bff-gateway/                # Spring Cloud Gateway + validacion JWT
-  docker-compose.yml          # solo Postgres (uso puntual, ver seccion 5)
-  init-db/01-schemas.sql      # esquemas por microservicio
+  init-db/01-schemas.sql      # esquemas (bases) por microservicio
   start-noauth.bat/.sh        # atajo modo manual sin Docker
 
 cafeteria-frontend/cafeteria-frontend/
@@ -509,7 +508,7 @@ eso es de la Fase 3) en su `application.yml`.
 - `restart: unless-stopped` en todos los servicios.
 - `mem_limit: 512m` + `JAVA_TOOL_OPTIONS` (heap acotado) en cada JVM, para que 9+ contenedores Java no se
   maten entre sí por falta de memoria en una instancia pequeña.
-- Los 8 microservicios esperan a `rabbitmq-1: service_healthy` además de `postgres`.
+- Los 8 microservicios esperan a `rabbitmq-1: service_healthy` además de `mysql`.
 - En `noauth`/desarrollo local sin Docker, `RABBITMQ_ADDRESSES` cae a `localhost:5672` por defecto — sigue
   funcionando con un solo RabbitMQ local (sin cluster).
 
@@ -636,7 +635,7 @@ curl -i -X DELETE http://localhost:8080/api/rabbitmq/queues/pagos.pedido-creado.
 ## 15. EP2 — Fase 6: Terraform + despliegue en AWS
 
 Todo el stack (8 microservicios + `bff-gateway` + `ms-notificaciones` + `ms-rabbitmq-admin` + frontend +
-cluster RabbitMQ + Postgres) corre en **una sola EC2** creada con Terraform, compatible con **AWS Academy
+cluster RabbitMQ + MySQL) corre en **una sola EC2** creada con Terraform, compatible con **AWS Academy
 Learner Lab**: usa el key pair `vockey` y el `LabInstanceProfile` ya existentes y no crea ningún rol ni
 política IAM (el Lab no lo permite). Delante de la EC2 va un **API Gateway** (HTTP API) que reenvía
 `/api/**` al `bff-gateway` en el puerto 8080.
@@ -684,7 +683,7 @@ pega directo al puerto 8080 de la EC2 saltándose el API Gateway, no trae el hea
 **403** (prueba S8 de `docs/EP2_PLAN.md` sección 11). En local / Docker Compose, `ORIGIN_VERIFY_SECRET`
 queda vacío por defecto y el filtro no exige nada: no rompe nada de lo que ya funcionaba.
 
-También se parametrizó el password de Postgres (`DB_PASSWORD`, antes fijo en `cafeteria` dentro de
+También se parametrizó el password de MySQL (`DB_PASSWORD`, antes fijo en `cafeteria` dentro de
 `docker-compose.yml`) para que Terraform pueda generarlo en EC2 sin tocar el compose; en local sigue
 usando `cafeteria` por defecto si no defines la variable.
 
@@ -770,3 +769,45 @@ chmod +x scripts/smoke-test.sh
 ./scripts/smoke-test.sh http://localhost:8080
 ```
 
+
+## 17. Migración de base de datos: PostgreSQL → MySQL
+
+Los 9 microservicios con base de datos (todos excepto `bff-gateway` y `ms-rabbitmq-admin`, que no
+tienen) pasaron de PostgreSQL a **MySQL 8**. Cambio mecánico, no estructural: ningún módulo usaba SQL
+nativo, tipos específicos de Postgres (`jsonb`, `uuid` column, `ILIKE`, `ON CONFLICT`, etc.) ni dialecto
+de Hibernate explícito — todo es JPA estándar con `ddl-auto` (el esquema lo genera Hibernate solo), así
+que no hizo falta tocar ninguna entidad, repositorio ni query.
+
+### Qué cambió
+- **`pom.xml`** (9 módulos): `org.postgresql:postgresql` → `com.mysql:mysql-connector-j`.
+- **`application.yml`** (9 módulos): `DB_URL` default de `jdbc:postgresql://localhost:5432/cafeteria` a
+  `jdbc:mysql://localhost:3306/cafeteria?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC`
+  (el `characterEncoding=UTF-8` es necesario por los acentos en `categoria` de productos — "Bebidas
+  frías", "Pastelería" — MySQL no usa UTF-8 por defecto en la conexión).
+- **H2 de `noauth`/tests** (18 archivos): `MODE=PostgreSQL` → `MODE=MySQL`, para que el modo sin Azure y
+  los tests ejerciten semántica MySQL en vez de seguir emulando Postgres.
+- **`docker-compose.yml`**: el servicio `postgres` (imagen `postgres:16-alpine`) pasó a `mysql` (imagen
+  `mysql:8.4`), con su propio volumen, puerto 3306 y healthcheck (`mysqladmin ping`). Los 9
+  microservicios que dependían de `postgres: condition: service_healthy` ahora dependen de `mysql`.
+- **`init-db/01-schemas.sql`**: sin cambios de contenido — en MySQL `CREATE SCHEMA` es sinónimo de
+  `CREATE DATABASE`, así que las mismas 9 sentencias `CREATE SCHEMA IF NOT EXISTS <servicio>` crean una
+  base por microservicio igual que antes creaban un esquema. Cada servicio sigue seleccionando la suya
+  vía `spring.jpa.properties.hibernate.default_schema` en su `application.yml`, sin tocar.
+- **Terraform**: `variables.tf`/`terraform.tfvars.example`/`user_data.sh.tftpl`/`main.tf` actualizan sus
+  comentarios y descripciones de `DB_PASSWORD` de "Postgres" a "MySQL" (la variable y el flujo no
+  cambian: Terraform no sabe ni le importa qué motor de base de datos hay detrás).
+
+### Qué NO cambió (a propósito)
+- Ninguna entidad `@Entity`, repositorio ni query — Hibernate regenera el DDL correcto para MySQL solo
+  con el cambio de driver/URL.
+- Los campos `UUID` (`EventoProcesado.eventId`, usado para idempotencia en 6 módulos) siguen siendo
+  `java.util.UUID` en el código Java; Hibernate los mapea a `binary(16)` en MySQL (antes `uuid` nativo en
+  Postgres) sin que haya que anotar nada distinto.
+
+### Cómo probarlo
+```bash
+docker compose up -d mysql
+# o el stack completo:
+docker compose up --build -d
+mysql -h 127.0.0.1 -P 3306 -u cafeteria -pcafeteria -e "SHOW DATABASES;"
+```

@@ -22,7 +22,7 @@ azure_jwk_set_uri = "https://<subdominio>.ciamlogin.com/<TENANT_ID>/discovery/v2
 azure_authority   = "https://<subdominio>.ciamlogin.com/"
 
 # NUNCA uses estos valores de ejemplo en un despliegue real.
-db_password            = "<PASSWORD_POSTGRES>"
+db_password            = "<PASSWORD_MYSQL>"
 rabbitmq_password      = "<PASSWORD_RABBITMQ>"
 rabbitmq_erlang_cookie = "<COOKIE_ERLANG_UNICA_Y_SECRETA>"
 

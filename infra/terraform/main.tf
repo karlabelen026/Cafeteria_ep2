@@ -102,7 +102,7 @@ resource "aws_instance" "app" {
     volume_type = "gp3"
     # 50 GB (antes 30): con 30 GB "docker compose build" de los 11
     # contenedores (8 ms + bff + notificaciones + admin, cada uno con su
-    # propia imagen Maven) + las imagenes de Postgres y los 3 nodos RabbitMQ
+    # propia imagen Maven) + las imagenes de MySQL y los 3 nodos RabbitMQ
     # dejaba el disco muy justo.
     volume_size = 50
   }

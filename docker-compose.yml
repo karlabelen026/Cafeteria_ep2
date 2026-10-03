@@ -5,7 +5,7 @@
 # .env.example en la raiz):
 #   - SPRING_PROFILES_ACTIVE=noauth  -> sin Azure, H2 embebida (demo rapida).
 #   - SPRING_PROFILES_ACTIVE= (vacio)-> valida JWT de Azure Entra ID real y
-#     usa Postgres (servicio "postgres" de este mismo compose). Requiere
+#     usa MySQL (servicio "mysql" de este mismo compose). Requiere
 #     completar AZURE_ISSUER_URI / AZURE_AUDIENCES / AZURE_JWK_SET_URI (solo
 #     tenants ciamlogin) / VITE_AZURE_* en tu .env
 #     con los datos reales de tus App Registrations.
@@ -21,7 +21,7 @@ x-backend-common: &backend-common
   environment:
     SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE-noauth}
     JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
-    DB_URL: jdbc:postgresql://postgres:5432/cafeteria
+    DB_URL: jdbc:mysql://mysql:3306/cafeteria?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
     DB_USER: cafeteria
     DB_PASSWORD: ${DB_PASSWORD:-cafeteria}
     AZURE_ISSUER_URI: ${AZURE_ISSUER_URI:-https://login.microsoftonline.com/<TENANT_ID>/v2.0}
@@ -32,21 +32,22 @@ x-backend-common: &backend-common
     RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-cafeteria}
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: cafeteria-postgres
+  mysql:
+    image: mysql:8.4
+    container_name: cafeteria-mysql
     restart: unless-stopped
     environment:
-      POSTGRES_DB: cafeteria
-      POSTGRES_USER: cafeteria
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-cafeteria}
+      MYSQL_DATABASE: cafeteria
+      MYSQL_USER: cafeteria
+      MYSQL_PASSWORD: ${DB_PASSWORD:-cafeteria}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-cafeteria}
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - cafeteria_pgdata:/var/lib/postgresql/data
+      - cafeteria_mysqldata:/var/lib/mysql
       - ./cafeteria-backend/cafeteria-backend/init-db:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cafeteria"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "cafeteria", "-p${DB_PASSWORD:-cafeteria}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -145,7 +146,7 @@ services:
     volumes:
       - ms_productos_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -168,7 +169,7 @@ services:
     volumes:
       - ms_inventario_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -191,7 +192,7 @@ services:
     volumes:
       - ms_pedidos_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -214,7 +215,7 @@ services:
     volumes:
       - ms_clientes_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -237,7 +238,7 @@ services:
     volumes:
       - ms_pagos_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -260,7 +261,7 @@ services:
     volumes:
       - ms_empleados_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -283,7 +284,7 @@ services:
     volumes:
       - ms_proveedores_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -306,7 +307,7 @@ services:
     volumes:
       - ms_reportes_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -329,7 +330,7 @@ services:
     volumes:
       - ms_notificaciones_data:/app/data
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       rabbitmq-1:
         condition: service_healthy
@@ -447,7 +448,7 @@ services:
       - bff-gateway
 
 volumes:
-  cafeteria_pgdata:
+  cafeteria_mysqldata:
   rabbitmq_1_data:
   rabbitmq_2_data:
   rabbitmq_3_data:
