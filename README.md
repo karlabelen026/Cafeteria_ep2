@@ -654,7 +654,7 @@ Archivos nuevos en [`infra/terraform/`](infra/terraform/) (detalle completo en s
 |---|---|
 | `versions.tf` | providers `aws ~> 5.0` y `random ~> 3.6`, Terraform `>= 1.5` |
 | `variables.tf` | región, tipo de instancia de backend y de frontend, `key_name`/`iam_instance_profile` del Lab, `my_ip_cidr`, datos de Azure, passwords sensibles (`db_password`, `rabbitmq_password`, `rabbitmq_erlang_cookie`) |
-| `main.tf` | AMI Ubuntu 22.04 (data source Canonical), 2 Security Groups (backend: 22 y 15672 solo desde `my_ip_cidr`, 8080 para el API Gateway; frontend: 22 solo desde `my_ip_cidr`, 80/443 públicos), 2 Elastic IP, las 2 instancias EC2 (backend disco gp3 50 GB, frontend 20 GB) con sus `user_data` |
+| `main.tf` | AMI Ubuntu 22.04 (data source Canonical), 2 Security Groups (backend: 22 y 15672 solo desde `my_ip_cidr`, 8080 para el API Gateway; frontend: 22 solo desde `my_ip_cidr`, 80/443 públicos), 2 Elastic IP, las 2 instancias EC2 (backend disco gp3 50 GB, frontend 20 GB) con sus `user_data`, y un volumen EBS aparte (20 GB) para los datos de MySQL que sobrevive aunque se reemplace la instancia de backend |
 | `monitoring.tf` | alarmas CloudWatch `StatusCheckFailed_System` (recover) y `StatusCheckFailed_Instance` (reboot) por cada instancia, desactivables con `enable_recovery_alarms` |
 | `apigateway.tf` | API Gateway HTTP API → `HTTP_PROXY` hacia `http://<EIP_backend>:8080/api/{proxy}`, inyectando el header `X-Origin-Verify` (parameter mapping) |
 | `user_data_backend.sh.tftpl` | instala Docker + plugin de compose, crea 4 GB de swap, clona el repo, genera el `.env`, crea y habilita `cafeteria.service` (levanta todo menos `frontend`) |

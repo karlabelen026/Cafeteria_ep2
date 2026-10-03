@@ -3,6 +3,11 @@
 .env.local
 .env.*.local
 
+# Datos de MySQL en local (bind mount de docker-compose.yml; en AWS esta
+# misma ruta es el punto de montaje del volumen EBS persistente, ver
+# infra/terraform/user_data_backend.sh.tftpl)
+/mysql-data/
+
 # Sistema operativo / IDE
 .DS_Store
 Thumbs.db

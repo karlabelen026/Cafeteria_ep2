@@ -129,6 +129,7 @@ resource "aws_eip" "frontend" {
 resource "aws_instance" "backend" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.backend_instance_type
+  availability_zone      = var.backend_availability_zone
   key_name               = var.key_name
   iam_instance_profile   = var.iam_instance_profile
   vpc_security_group_ids = [aws_security_group.backend.id]
@@ -157,6 +158,29 @@ resource "aws_instance" "backend" {
   tags = {
     Name = "cafeteria360-backend"
   }
+}
+
+# Volumen EBS separado del disco raiz para /var/lib/mysql (ver
+# user_data_backend.sh.tftpl: se monta en $APP_DIR/mysql-data, que
+# docker-compose.yml bind-mountea en el contenedor de MySQL). Al vivir en un
+# resource aparte de aws_instance.backend, un reemplazo de la instancia
+# (ej. "terraform apply -replace=aws_instance.backend" para probar un boot
+# limpio) no lo destruye: los datos de MySQL sobreviven. Debe estar en la
+# misma AZ que la instancia, por eso esta fija en backend_availability_zone.
+resource "aws_ebs_volume" "mysql_data" {
+  availability_zone = var.backend_availability_zone
+  size              = 20
+  type              = "gp3"
+
+  tags = {
+    Name = "cafeteria360-mysql-data"
+  }
+}
+
+resource "aws_volume_attachment" "mysql_data" {
+  device_name = "/dev/sdf"
+  volume_id   = aws_ebs_volume.mysql_data.id
+  instance_id = aws_instance.backend.id
 }
 
 resource "aws_instance" "frontend" {

@@ -157,6 +157,16 @@ automáticamente a partir del Account ID de las credenciales que le pasaste.
 
 ## Notas de diseño
 
+- **Volumen EBS separado para los datos de MySQL**: `aws_ebs_volume.mysql_data`
+  (20 GB, misma AZ fija que la instancia via `backend_availability_zone`) vive
+  aparte del disco raíz de la instancia de backend y se monta en
+  `$APP_DIR/mysql-data` (`user_data_backend.sh.tftpl`), que `docker-compose.yml`
+  bind-mountea en `/var/lib/mysql`. Un `terraform apply -replace=aws_instance.backend`
+  destruye y recrea la instancia (y el volumen de datos de **Docker**, que
+  vivía en el disco raíz), pero el volumen EBS no se toca: el script lo
+  detecta (ya tiene filesystem, no lo reformatea) y lo vuelve a montar con
+  los datos intactos. Sin esto, cada reemplazo de instancia dejaba la base de
+  datos vacía.
 - **Dos instancias, sin Elastic Load Balancer ni Auto Scaling**: backend y
   frontend separados (frontend liviano en `t3.micro`, backend con todo el
   peso de las JVM en `t3.large`) alcanza para la demo y evita costos/roles

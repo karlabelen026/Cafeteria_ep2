@@ -20,6 +20,12 @@ variable "frontend_instance_type" {
   default     = "t3.micro"
 }
 
+variable "backend_availability_zone" {
+  description = "AZ fija para la instancia de backend y para el volumen EBS de datos de MySQL (aws_ebs_volume.mysql_data). Tiene que ser la misma para ambos (un volumen EBS solo se adjunta a instancias de su propia AZ); fijarla evita que un reemplazo de la instancia (terraform apply -replace=aws_instance.backend) la mande a otra AZ y deje el volumen con datos sin poder re-adjuntarse."
+  type        = string
+  default     = "us-east-1a"
+}
+
 variable "key_name" {
   description = "Nombre del key pair ya existente en el Learner Lab (siempre se llama \"vockey\")."
   type        = string

@@ -44,7 +44,12 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - cafeteria_mysqldata:/var/lib/mysql
+      # Bind mount (no volumen nombrado) a proposito: en la EC2 de backend,
+      # infra/terraform/user_data_backend.sh.tftpl monta ahi un volumen EBS
+      # separado del disco raiz (ver aws_ebs_volume.mysql_data), para que los
+      # datos sobrevivan a un reemplazo de la instancia. En local, Docker
+      # crea la carpeta sola (ver .gitignore).
+      - ./mysql-data:/var/lib/mysql
       - ./cafeteria-backend/cafeteria-backend/init-db:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "cafeteria", "-p${DB_PASSWORD:-cafeteria}"]
@@ -448,7 +453,6 @@ services:
       - bff-gateway
 
 volumes:
-  cafeteria_mysqldata:
   rabbitmq_1_data:
   rabbitmq_2_data:
   rabbitmq_3_data:

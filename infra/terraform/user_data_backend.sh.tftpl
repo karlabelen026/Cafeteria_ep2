@@ -42,7 +42,9 @@ if [ ! -f /swapfile ]; then
   echo "/swapfile none swap sw 0 0" >> /etc/fstab
 fi
 
-# ── Repositorio ──────────────────────────────────────────────────────────────
+# ── Repositorio (antes de montar el volumen de datos: "git clone" borra y
+# recrea $APP_DIR si todavia no es un repo git, y no debe hacerlo sobre un
+# punto de montaje ya ocupado) ────────────────────────────────────────────────
 if [ ! -d "$APP_DIR/.git" ]; then
   rm -rf "$APP_DIR"
   git clone --branch "${repo_branch}" "${repo_url}" "$APP_DIR"
@@ -53,6 +55,32 @@ else
   git pull origin "${repo_branch}"
 fi
 chown -R ubuntu:ubuntu "$APP_DIR"
+
+# ── Volumen EBS de datos de MySQL (ver aws_ebs_volume.mysql_data /
+# aws_volume_attachment.mysql_data en main.tf): separado del disco raiz para
+# que sobreviva si esta instancia se reemplaza. En instancias Nitro (como
+# t3.*) un volumen adjuntado como "/dev/sdf" aparece como /dev/nvme1n1, no
+# con ese nombre logico; se espera a que el kernel lo detecte. Si ya tiene
+# un filesystem (reatado a una instancia nueva, datos existentes) no se
+# formatea; si esta en blanco (primer arranque de la vida del volumen) se
+# formatea una sola vez. ───────────────────────────────────────────────────
+DATA_DEVICE=/dev/nvme1n1
+for i in $(seq 1 30); do
+  [ -b "$DATA_DEVICE" ] && break
+  sleep 2
+done
+if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
+  mkfs.ext4 "$DATA_DEVICE"
+fi
+mkdir -p "$APP_DIR/mysql-data"
+if ! mountpoint -q "$APP_DIR/mysql-data"; then
+  mount "$DATA_DEVICE" "$APP_DIR/mysql-data"
+fi
+chown -R 999:999 "$APP_DIR/mysql-data"
+DATA_UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
+if ! grep -q "$DATA_UUID" /etc/fstab; then
+  echo "UUID=$DATA_UUID $APP_DIR/mysql-data ext4 defaults,nofail 0 2" >> /etc/fstab
+fi
 
 # ── .env (nunca se commitea; ver .gitignore del repo) ─────────────────────────
 cat > "$APP_DIR/.env" <<ENV_EOF
