@@ -100,7 +100,11 @@ resource "aws_instance" "app" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 30
+    # 50 GB (antes 30): con 30 GB "docker compose build" de los 11
+    # contenedores (8 ms + bff + notificaciones + admin, cada uno con su
+    # propia imagen Maven) + las imagenes de Postgres y los 3 nodos RabbitMQ
+    # dejaba el disco muy justo.
+    volume_size = 50
   }
 
   user_data = templatefile("${path.module}/user_data.sh.tftpl", {
