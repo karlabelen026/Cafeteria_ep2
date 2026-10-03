@@ -1,7 +1,7 @@
 # Terraform — CafeGestión360 en AWS Academy Learner Lab
 
 Crea una sola EC2 (Ubuntu 22.04) que corre todo el stack con Docker Compose
-(los 8 microservicios + bff-gateway + frontend + RabbitMQ cluster + Postgres),
+(los 8 microservicios + bff-gateway + frontend + RabbitMQ cluster + MySQL),
 más un API Gateway (HTTP API) delante del BFF. Pensado para el Learner Lab:
 usa el key pair `vockey` y el `LabInstanceProfile` ya existentes, y no crea
 ningún rol ni política IAM (el Lab no lo permite).
@@ -131,7 +131,7 @@ real sin que nadie lo pidiera.
 | `MY_IP_CIDR` | tu IP pública en formato CIDR, para `variables.tf` |
 | `AZURE_TENANT_ID`, `AZURE_BACKEND_CLIENT_ID`, `AZURE_FRONTEND_CLIENT_ID`, `AZURE_ISSUER_URI` | datos de tus App Registrations (sección 7 del plan) |
 | `AZURE_JWK_SET_URI`, `AZURE_AUTHORITY` | solo tenants External ID (ciamlogin); dejalos vacíos si no aplica |
-| `DB_PASSWORD`, `RABBITMQ_PASSWORD`, `RABBITMQ_ERLANG_COOKIE` | passwords de Postgres y RabbitMQ |
+| `DB_PASSWORD`, `RABBITMQ_PASSWORD`, `RABBITMQ_ERLANG_COOKIE` | passwords de MySQL y RabbitMQ |
 | `ENABLE_RECOVERY_ALARMS` | opcional, default `true` |
 
 `repo_url` **no** es un secret: el workflow lo arma solo con
@@ -153,6 +153,15 @@ automáticamente a partir del Account ID de las credenciales que le pasaste.
   y en el `.env` de la EC2. El BFF (`OriginVerifyGlobalFilter`) lo compara y
   devuelve 403 si alguien le pega directo al puerto 8080 (prueba S8 de
   `docs/EP2_PLAN.md` sección 11).
+  **Ojo con la sintaxis del valor estático en `request_parameters`**: va
+  **sin** comillas ni llaves (`"overwrite:header.x-origin-verify" = random_password.origin_verify_secret.result`,
+  valor literal tal cual). La documentación de AWS muestra la columna
+  "Static value" como `{{string}}`, pero eso es notación de marcador de
+  posición, no sintaxis real — tanto `'valor'` (comillas simples) como
+  `{{valor}}` (llaves literales) fallan: el primero no da error pero el
+  mapping nunca se aplica en runtime (todo responde 403 a través del
+  Gateway, sin pista de por qué); el segundo sí da un 400 explícito
+  ("Invalid mapping expression specified") al aplicar.
 - **Elastic IP antes que la instancia**: se reserva con `aws_eip` (sin
   asociar) para poder pasar su IP al `user_data` de la propia instancia sin
   crear una dependencia circular; `aws_eip_association` la asocia después.

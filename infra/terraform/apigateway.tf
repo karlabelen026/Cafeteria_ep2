@@ -20,7 +20,7 @@ resource "aws_apigatewayv2_integration" "ec2_proxy" {
   payload_format_version = "1.0"
 
   request_parameters = {
-    "overwrite:header.X-Origin-Verify" = "'${random_password.origin_verify_secret.result}'"
+    "overwrite:header.x-origin-verify" = random_password.origin_verify_secret.result
   }
 }
 
