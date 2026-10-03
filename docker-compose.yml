@@ -81,8 +81,8 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   rabbitmq-2:
     image: rabbitmq:3.13-management
@@ -103,8 +103,8 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
     depends_on:
       rabbitmq-1:
         condition: service_healthy
@@ -128,8 +128,8 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
     depends_on:
       rabbitmq-1:
         condition: service_healthy
@@ -154,8 +154,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-inventario:
     <<: *backend-common
@@ -177,8 +177,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8082/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-pedidos:
     <<: *backend-common
@@ -200,8 +200,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8083/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-clientes:
     <<: *backend-common
@@ -223,8 +223,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8084/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-pagos:
     <<: *backend-common
@@ -246,8 +246,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8085/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-empleados:
     <<: *backend-common
@@ -269,8 +269,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8086/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-proveedores:
     <<: *backend-common
@@ -292,8 +292,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8087/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-reportes:
     <<: *backend-common
@@ -315,8 +315,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8088/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-notificaciones:
     <<: *backend-common
@@ -338,8 +338,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8089/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   ms-rabbitmq-admin:
     <<: *backend-common
@@ -369,8 +369,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8090/actuator/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 18
+      start_period: 60s
 
   bff-gateway:
     <<: *backend-common
