@@ -9,9 +9,9 @@ variable "region" {
 }
 
 variable "instance_type" {
-  description = "Tipo de instancia EC2 que corre los 11 contenedores (8 ms + bff + notificaciones+admin) con Docker Compose. t3.large (8 GB) se queda sin memoria: RabbitMQ dispara su alarma de memoria (system_memory_high_watermark) con los 3 nodos + 11 JVMs + Postgres corriendo juntos; t3.xlarge (16 GB) da margen real."
+  description = "Tipo de instancia EC2 que corre los 11 contenedores (8 ms + bff + notificaciones+admin) con Docker Compose. t3.xlarge daria mas margen de memoria, pero la politica Pvoclabs2 del Learner Lab deniega RunInstances/StartInstances para cualquier tamano mayor a large (confirmado con --dry-run); por eso se vuelve a t3.large, con el mem_limit de RabbitMQ (ver docker-compose.yml) como colchon."
   type        = string
-  default     = "t3.xlarge"
+  default     = "t3.large"
 }
 
 variable "key_name" {
