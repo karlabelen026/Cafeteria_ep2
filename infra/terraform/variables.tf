@@ -8,10 +8,16 @@ variable "region" {
   default     = "us-east-1"
 }
 
-variable "instance_type" {
-  description = "Tipo de instancia EC2 que corre los 11 contenedores (8 ms + bff + notificaciones+admin) con Docker Compose. t3.xlarge daria mas margen de memoria, pero la politica Pvoclabs2 del Learner Lab deniega RunInstances/StartInstances para cualquier tamano mayor a large (confirmado con --dry-run); por eso se vuelve a t3.large, con el mem_limit de RabbitMQ (ver docker-compose.yml) como colchon."
+variable "backend_instance_type" {
+  description = "Tipo de instancia EC2 que corre MySQL + los 3 nodos RabbitMQ + los 9 microservicios + bff-gateway (todo menos el frontend, ver main.tf). t3.xlarge daria mas margen de memoria, pero la politica Pvoclabs2 del Learner Lab deniega RunInstances/StartInstances para cualquier tamano mayor a large (confirmado con --dry-run); por eso se usa t3.large, con el mem_limit de RabbitMQ (ver docker-compose.yml) como colchon."
   type        = string
   default     = "t3.large"
+}
+
+variable "frontend_instance_type" {
+  description = "Tipo de instancia EC2 que solo corre nginx sirviendo el build estatico de React (ver main.tf). Mucho mas liviana que la de backend: no corre ninguna JVM."
+  type        = string
+  default     = "t3.micro"
 }
 
 variable "key_name" {

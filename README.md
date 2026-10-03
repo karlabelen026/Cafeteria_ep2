@@ -634,11 +634,18 @@ curl -i -X DELETE http://localhost:8080/api/rabbitmq/queues/pagos.pedido-creado.
 
 ## 15. EP2 — Fase 6: Terraform + despliegue en AWS
 
-Todo el stack (8 microservicios + `bff-gateway` + `ms-notificaciones` + `ms-rabbitmq-admin` + frontend +
-cluster RabbitMQ + MySQL) corre en **una sola EC2** creada con Terraform, compatible con **AWS Academy
-Learner Lab**: usa el key pair `vockey` y el `LabInstanceProfile` ya existentes y no crea ningún rol ni
-política IAM (el Lab no lo permite). Delante de la EC2 va un **API Gateway** (HTTP API) que reenvía
-`/api/**` al `bff-gateway` en el puerto 8080.
+El stack corre en **dos EC2** creadas con Terraform, compatibles con **AWS Academy Learner Lab**: usa el
+key pair `vockey` y el `LabInstanceProfile` ya existentes y no crea ningún rol ni política IAM (el Lab no
+lo permite).
+
+- **backend** (`t3.large`): MySQL + cluster RabbitMQ + los 8 microservicios + `ms-notificaciones` +
+  `ms-rabbitmq-admin` + `bff-gateway`.
+- **frontend** (`t3.micro`): solo nginx sirviendo el build de React.
+
+El frontend nunca le habla a la instancia de backend directamente: siempre pasa por el **API Gateway**
+(HTTP API) que reenvía `/api/**` al `bff-gateway` en el puerto 8080 de la instancia de backend. Esto
+permite crear/reemplazar cada instancia de forma independiente (ver sección "Terraform: validación de
+boot limpio" más abajo).
 
 Archivos nuevos en [`infra/terraform/`](infra/terraform/) (detalle completo en su propio
 [README](infra/terraform/README.md)):
@@ -646,12 +653,13 @@ Archivos nuevos en [`infra/terraform/`](infra/terraform/) (detalle completo en s
 | Archivo | Contenido |
 |---|---|
 | `versions.tf` | providers `aws ~> 5.0` y `random ~> 3.6`, Terraform `>= 1.5` |
-| `variables.tf` | región, tipo de instancia, `key_name`/`iam_instance_profile` del Lab, `my_ip_cidr`, datos de Azure, passwords sensibles (`db_password`, `rabbitmq_password`, `rabbitmq_erlang_cookie`) |
-| `main.tf` | AMI Ubuntu 22.04 (data source Canonical), Security Group (22 y 15672 solo desde `my_ip_cidr`; 80/443 públicos; 8080 para el API Gateway), Elastic IP, la instancia EC2 (disco gp3 30 GB) con su `user_data` |
-| `monitoring.tf` | alarmas CloudWatch `StatusCheckFailed_System` (recover) y `StatusCheckFailed_Instance` (reboot), desactivables con `enable_recovery_alarms` |
-| `apigateway.tf` | API Gateway HTTP API → `HTTP_PROXY` hacia `http://<EIP>:8080/api/{proxy}`, inyectando el header `X-Origin-Verify` (parameter mapping) |
-| `user_data.sh.tftpl` | instala Docker + plugin de compose, crea 4 GB de swap, clona el repo, genera el `.env` y un certificado autofirmado para nginx, crea y habilita el servicio systemd `cafeteria.service` |
-| `outputs.tf` | IP elástica, URL del frontend, URL del API Gateway, URL de la UI de RabbitMQ, comando SSH |
+| `variables.tf` | región, tipo de instancia de backend y de frontend, `key_name`/`iam_instance_profile` del Lab, `my_ip_cidr`, datos de Azure, passwords sensibles (`db_password`, `rabbitmq_password`, `rabbitmq_erlang_cookie`) |
+| `main.tf` | AMI Ubuntu 22.04 (data source Canonical), 2 Security Groups (backend: 22 y 15672 solo desde `my_ip_cidr`, 8080 para el API Gateway; frontend: 22 solo desde `my_ip_cidr`, 80/443 públicos), 2 Elastic IP, las 2 instancias EC2 (backend disco gp3 50 GB, frontend 20 GB) con sus `user_data` |
+| `monitoring.tf` | alarmas CloudWatch `StatusCheckFailed_System` (recover) y `StatusCheckFailed_Instance` (reboot) por cada instancia, desactivables con `enable_recovery_alarms` |
+| `apigateway.tf` | API Gateway HTTP API → `HTTP_PROXY` hacia `http://<EIP_backend>:8080/api/{proxy}`, inyectando el header `X-Origin-Verify` (parameter mapping) |
+| `user_data_backend.sh.tftpl` | instala Docker + plugin de compose, crea 4 GB de swap, clona el repo, genera el `.env`, crea y habilita `cafeteria.service` (levanta todo menos `frontend`) |
+| `user_data_frontend.sh.tftpl` | instala Docker + plugin de compose, crea 2 GB de swap, clona el repo, genera el `.env` y un certificado autofirmado para nginx, crea y habilita `cafeteria.service` (levanta solo `frontend`, con `--no-deps`) |
+| `outputs.tf` | IPs elásticas, URL del frontend, URL del API Gateway, URL de la UI de RabbitMQ, comandos SSH |
 | `terraform.tfvars.example` | ejemplo sin secretos reales |
 | `backend.tf` + `init-backend.sh` | backend remoto (S3 + bloqueo DynamoDB) para que el state no viva solo en un disco: imprescindible para que GitHub Actions (runners nuevos en cada corrida) y tu máquina local compartan el mismo state |
 

@@ -23,9 +23,9 @@ resource "random_password" "origin_verify_secret" {
   special = false
 }
 
-resource "aws_security_group" "app" {
-  name        = "cafeteria360-sg"
-  description = "CafeGestion360: SSH y UI de RabbitMQ solo desde mi IP; 80/443 publicos; 8080 para el API Gateway"
+resource "aws_security_group" "backend" {
+  name        = "cafeteria360-backend-sg"
+  description = "CafeGestion360 backend (MySQL, RabbitMQ, microservicios, bff-gateway): SSH y UI de RabbitMQ solo desde mi IP; 8080 publico para el API Gateway"
 
   ingress {
     description = "SSH"
@@ -39,6 +39,39 @@ resource "aws_security_group" "app" {
     description = "RabbitMQ management UI (solo nodo 1)"
     from_port   = 15672
     to_port     = 15672
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+  ingress {
+    description = "BFF: solo deberia llegarle trafico del API Gateway (OriginVerifyGlobalFilter rechaza el resto, ver bff-gateway)"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Salida libre (pull de imagenes, apt, Maven, Azure, etc.)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "cafeteria360-backend-sg"
+  }
+}
+
+resource "aws_security_group" "frontend" {
+  name        = "cafeteria360-frontend-sg"
+  description = "CafeGestion360 frontend (nginx): SSH solo desde mi IP; 80/443 publicos"
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.my_ip_cidr]
   }
@@ -59,16 +92,8 @@ resource "aws_security_group" "app" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ingress {
-    description = "BFF: solo deberia llegarle trafico del API Gateway (OriginVerifyGlobalFilter rechaza el resto, ver bff-gateway)"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   egress {
-    description = "Salida libre (pull de imagenes, apt, npm, Azure, etc.)"
+    description = "Salida libre (pull de imagenes, apt, npm, etc.)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -76,60 +101,98 @@ resource "aws_security_group" "app" {
   }
 
   tags = {
-    Name = "cafeteria360-sg"
+    Name = "cafeteria360-frontend-sg"
   }
 }
 
-# Se reserva antes que la instancia para poder inyectar la IP en su propio
-# user_data sin crear una dependencia circular; la asociación se hace aparte
-# con aws_eip_association una vez que la instancia ya existe.
-resource "aws_eip" "app" {
+# Se reservan antes que las instancias para poder inyectar las IPs en los
+# user_data (el back necesita la IP del front para CORS/FRONTEND_ORIGIN, el
+# front necesita la suya propia) sin crear una dependencia circular; la
+# asociación se hace aparte con aws_eip_association una vez que la instancia
+# ya existe.
+resource "aws_eip" "backend" {
   domain = "vpc"
 
   tags = {
-    Name = "cafeteria360-eip"
+    Name = "cafeteria360-backend-eip"
   }
 }
 
-resource "aws_instance" "app" {
+resource "aws_eip" "frontend" {
+  domain = "vpc"
+
+  tags = {
+    Name = "cafeteria360-frontend-eip"
+  }
+}
+
+resource "aws_instance" "backend" {
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
+  instance_type          = var.backend_instance_type
   key_name               = var.key_name
   iam_instance_profile   = var.iam_instance_profile
-  vpc_security_group_ids = [aws_security_group.app.id]
+  vpc_security_group_ids = [aws_security_group.backend.id]
 
   root_block_device {
     volume_type = "gp3"
-    # 50 GB (antes 30): con 30 GB "docker compose build" de los 11
-    # contenedores (8 ms + bff + notificaciones + admin, cada uno con su
-    # propia imagen Maven) + las imagenes de MySQL y los 3 nodos RabbitMQ
-    # dejaba el disco muy justo.
+    # 50 GB: "docker compose build" de los 10 contenedores (8 ms + bff +
+    # notificaciones+admin, cada uno con su propia imagen Maven) + la imagen
+    # de MySQL y los 3 nodos RabbitMQ dejaba el disco muy justo con menos.
     volume_size = 50
   }
 
-  user_data = templatefile("${path.module}/user_data.sh.tftpl", {
+  user_data = templatefile("${path.module}/user_data_backend.sh.tftpl", {
+    repo_url                = var.repo_url
+    repo_branch             = var.repo_branch
+    frontend_eip            = aws_eip.frontend.public_ip
+    db_password             = var.db_password
+    rabbitmq_password       = var.rabbitmq_password
+    rabbitmq_erlang_cookie  = var.rabbitmq_erlang_cookie
+    azure_issuer_uri        = var.azure_issuer_uri
+    azure_backend_client_id = var.azure_backend_client_id
+    azure_jwk_set_uri       = var.azure_jwk_set_uri
+    origin_verify_secret    = random_password.origin_verify_secret.result
+  })
+
+  tags = {
+    Name = "cafeteria360-backend"
+  }
+}
+
+resource "aws_instance" "frontend" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.frontend_instance_type
+  key_name               = var.key_name
+  iam_instance_profile   = var.iam_instance_profile
+  vpc_security_group_ids = [aws_security_group.frontend.id]
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = 20
+  }
+
+  user_data = templatefile("${path.module}/user_data_frontend.sh.tftpl", {
     repo_url                 = var.repo_url
     repo_branch              = var.repo_branch
-    eip                      = aws_eip.app.public_ip
-    db_password              = var.db_password
-    rabbitmq_password        = var.rabbitmq_password
-    rabbitmq_erlang_cookie   = var.rabbitmq_erlang_cookie
+    eip                      = aws_eip.frontend.public_ip
     azure_tenant_id          = var.azure_tenant_id
-    azure_backend_client_id  = var.azure_backend_client_id
     azure_frontend_client_id = var.azure_frontend_client_id
-    azure_issuer_uri         = var.azure_issuer_uri
-    azure_jwk_set_uri        = var.azure_jwk_set_uri
+    azure_backend_client_id  = var.azure_backend_client_id
     azure_authority          = var.azure_authority
-    origin_verify_secret     = random_password.origin_verify_secret.result
     api_gateway_url          = "${aws_apigatewayv2_api.app.api_endpoint}/api"
   })
 
   tags = {
-    Name = "cafeteria360"
+    Name = "cafeteria360-frontend"
   }
 }
 
-resource "aws_eip_association" "app" {
-  instance_id   = aws_instance.app.id
-  allocation_id = aws_eip.app.id
+resource "aws_eip_association" "backend" {
+  instance_id   = aws_instance.backend.id
+  allocation_id = aws_eip.backend.id
+}
+
+resource "aws_eip_association" "frontend" {
+  instance_id   = aws_instance.frontend.id
+  allocation_id = aws_eip.frontend.id
 }

@@ -1,11 +1,16 @@
-output "elastic_ip" {
-  description = "IP pública fija de la EC2 (no cambia aunque el Learner Lab detenga/reinicie la instancia)."
-  value       = aws_eip.app.public_ip
+output "frontend_elastic_ip" {
+  description = "IP pública fija de la EC2 de frontend (no cambia aunque el Learner Lab detenga/reinicie la instancia)."
+  value       = aws_eip.frontend.public_ip
+}
+
+output "backend_elastic_ip" {
+  description = "IP pública fija de la EC2 de backend (no cambia aunque el Learner Lab detenga/reinicie la instancia). El API Gateway le apunta a esta IP."
+  value       = aws_eip.backend.public_ip
 }
 
 output "frontend_url" {
-  description = "URL del frontend (nginx en la EC2, HTTPS con certificado autofirmado: el navegador pedirá aceptar la excepción)."
-  value       = "https://${aws_eip.app.public_ip}"
+  description = "URL del frontend (nginx en su propia EC2, HTTPS con certificado autofirmado: el navegador pedirá aceptar la excepción)."
+  value       = "https://${aws_eip.frontend.public_ip}"
 }
 
 output "api_gateway_url" {
@@ -14,13 +19,18 @@ output "api_gateway_url" {
 }
 
 output "rabbitmq_management_url" {
-  description = "UI de administración de RabbitMQ del nodo 1 (solo accesible desde my_ip_cidr)."
-  value       = "http://${aws_eip.app.public_ip}:15672"
+  description = "UI de administración de RabbitMQ del nodo 1, en la EC2 de backend (solo accesible desde my_ip_cidr)."
+  value       = "http://${aws_eip.backend.public_ip}:15672"
 }
 
-output "ssh_command" {
-  description = "Comando para conectarse por SSH a la instancia con la llave del Learner Lab."
-  value       = "ssh -i labsuser.pem ubuntu@${aws_eip.app.public_ip}"
+output "frontend_ssh_command" {
+  description = "Comando para conectarse por SSH a la EC2 de frontend con la llave del Learner Lab."
+  value       = "ssh -i labsuser.pem ubuntu@${aws_eip.frontend.public_ip}"
+}
+
+output "backend_ssh_command" {
+  description = "Comando para conectarse por SSH a la EC2 de backend con la llave del Learner Lab."
+  value       = "ssh -i labsuser.pem ubuntu@${aws_eip.backend.public_ip}"
 }
 
 output "origin_verify_secret" {

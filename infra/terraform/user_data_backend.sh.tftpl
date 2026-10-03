@@ -1,17 +1,19 @@
 #!/bin/bash
-# Generado por Terraform (infra/terraform/main.tf) a partir de este template.
-# Se ejecuta una sola vez al primer arranque de la EC2 (cloud-init). Deja todo
-# el stack arriba solo y crea el servicio systemd que lo vuelve a levantar en
-# cada arranque posterior (ver docs/EP2_PLAN.md sección 8.1: el Learner Lab
-# detiene la instancia al terminar la sesión del lab).
+# Generado por Terraform (infra/terraform/main.tf, aws_instance.backend) a
+# partir de este template. Se ejecuta una sola vez al primer arranque de la
+# EC2 (cloud-init). Levanta MySQL + los 3 nodos RabbitMQ + los 9
+# microservicios + bff-gateway (todo menos el frontend, que corre en su
+# propia instancia, ver user_data_frontend.sh.tftpl) y crea el servicio
+# systemd que los vuelve a levantar en cada arranque posterior (ver
+# docs/EP2_PLAN.md sección 8.1: el Learner Lab detiene la instancia al
+# terminar la sesión del lab).
 set -euxo pipefail
 
 APP_DIR=/opt/cafeteria
-CERT_DIR=/opt/cafeteria-certs
 
 # ── Docker + plugin de compose ──────────────────────────────────────────────
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg git openssl
+apt-get install -y ca-certificates curl gnupg git
 
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -29,8 +31,8 @@ systemctl enable docker
 systemctl start docker
 usermod -aG docker ubuntu
 
-# ── Swap de 4 GB: la t3.large compila/corre 11 JVM + MySQL + 3 nodos
-# RabbitMQ; sin swap el OOM killer mata procesos durante el primer
+# ── Swap de 4 GB: la t3.large compila/corre 9 JVM + bff-gateway + MySQL + 3
+# nodos RabbitMQ; sin swap el OOM killer mata procesos durante el primer
 # "docker compose build" (ver docs/EP2_PLAN.md sección 8.1). ─────────────────
 if [ ! -f /swapfile ]; then
   fallocate -l 4G /swapfile
@@ -52,37 +54,18 @@ else
 fi
 chown -R ubuntu:ubuntu "$APP_DIR"
 
-# ── Certificado autofirmado para nginx (HTTPS en 443, ver
-# cafeteria-frontend/.../docker-entrypoint.sh: busca fullchain.pem/privkey.pem
-# montados en /etc/nginx/certs) ───────────────────────────────────────────────
-mkdir -p "$CERT_DIR"
-if [ ! -f "$CERT_DIR/fullchain.pem" ]; then
-  openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
-    -keyout "$CERT_DIR/privkey.pem" \
-    -out "$CERT_DIR/fullchain.pem" \
-    -subj "/CN=${eip}" \
-    -addext "subjectAltName=IP:${eip}"
-fi
-chown -R ubuntu:ubuntu "$CERT_DIR"
-
 # ── .env (nunca se commitea; ver .gitignore del repo) ─────────────────────────
 cat > "$APP_DIR/.env" <<ENV_EOF
-# Generado por Terraform (infra/terraform/user_data.sh.tftpl). No editar a
-# mano: un "terraform apply" o un reinicio de la EC2 lo vuelve a generar.
+# Generado por Terraform (infra/terraform/user_data_backend.sh.tftpl). No
+# editar a mano: un "terraform apply" o un reinicio de la EC2 lo vuelve a
+# generar.
 SPRING_PROFILES_ACTIVE=
 AZURE_ISSUER_URI=${azure_issuer_uri}
 AZURE_AUDIENCES=${azure_backend_client_id},api://${azure_backend_client_id}
 AZURE_JWK_SET_URI=${azure_jwk_set_uri}
 
-VITE_API_BASE_URL=${api_gateway_url}
-VITE_AUTH_DISABLED=false
-VITE_AZURE_CLIENT_ID=${azure_frontend_client_id}
-VITE_AZURE_TENANT_ID=${azure_tenant_id}
-VITE_AZURE_AUTHORITY=${azure_authority}
-VITE_AZURE_REDIRECT_URI=https://${eip}
-VITE_API_SCOPES=api://${azure_backend_client_id}/pedidos.read,api://${azure_backend_client_id}/pedidos.write
-
-FRONTEND_ORIGIN=https://${eip}
+# Origen permitido para CORS: la instancia de frontend (nginx), no esta misma.
+FRONTEND_ORIGIN=https://${frontend_eip}
 ORIGIN_VERIFY_SECRET=${origin_verify_secret}
 
 DB_PASSWORD=${db_password}
@@ -94,24 +77,10 @@ ENV_EOF
 chown ubuntu:ubuntu "$APP_DIR/.env"
 chmod 600 "$APP_DIR/.env"
 
-# ── docker-compose.override.yml: publica 443/80 y monta el certificado. El
-# docker-compose.yml versionado solo publica 4200:80 para no romper el uso
-# local sin HTTPS (ver ese archivo). ──────────────────────────────────────────
-cat > "$APP_DIR/docker-compose.override.yml" <<COMPOSE_EOF
-services:
-  frontend:
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - $CERT_DIR:/etc/nginx/certs:ro
-COMPOSE_EOF
-chown ubuntu:ubuntu "$APP_DIR/docker-compose.override.yml"
-
-# ── Servicio systemd: levanta el stack en cada arranque ───────────────────────
+# ── Servicio systemd: levanta todo menos "frontend" en cada arranque ─────────
 cat > /etc/systemd/system/cafeteria.service <<SERVICE_EOF
 [Unit]
-Description=CafeGestion360 (docker compose)
+Description=CafeGestion360 backend (docker compose)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -120,7 +89,7 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=$APP_DIR
-ExecStart=/usr/bin/docker compose up -d --build
+ExecStart=/usr/bin/docker compose up -d --build mysql rabbitmq-1 rabbitmq-2 rabbitmq-3 ms-productos ms-inventario ms-pedidos ms-clientes ms-pagos ms-empleados ms-proveedores ms-reportes ms-notificaciones ms-rabbitmq-admin bff-gateway
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=0
 

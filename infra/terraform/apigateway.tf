@@ -12,7 +12,7 @@ resource "aws_apigatewayv2_integration" "ec2_proxy" {
   api_id             = aws_apigatewayv2_api.app.id
   integration_type   = "HTTP_PROXY"
   integration_method = "ANY"
-  integration_uri    = "http://${aws_eip.app.public_ip}:8080/api/{proxy}"
+  integration_uri    = "http://${aws_eip.backend.public_ip}:8080/api/{proxy}"
   connection_type    = "INTERNET"
 
   # El "parameter mapping" para transformar/agregar headers de integracion
