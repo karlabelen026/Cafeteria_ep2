@@ -61,6 +61,11 @@ services:
     container_name: rabbitmq-1
     hostname: rabbitmq-1
     restart: unless-stopped
+    # Sin limite, los 3 nodos podian crecer sin techo y, junto a las 11 JVMs
+    # (cada una ya con su propio mem_limit), terminaban disparando la alarma
+    # de memoria de RabbitMQ (system_memory_high_watermark) en el host (ver
+    # docs/EP2_PLAN.md seccion 8.1 e infra/terraform, instance_type).
+    mem_limit: 1g
     environment:
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-cafeteria_erlang_cookie}
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-cafeteria}
@@ -83,6 +88,7 @@ services:
     container_name: rabbitmq-2
     hostname: rabbitmq-2
     restart: unless-stopped
+    mem_limit: 1g
     environment:
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-cafeteria_erlang_cookie}
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-cafeteria}
@@ -107,6 +113,7 @@ services:
     container_name: rabbitmq-3
     hostname: rabbitmq-3
     restart: unless-stopped
+    mem_limit: 1g
     environment:
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-cafeteria_erlang_cookie}
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-cafeteria}

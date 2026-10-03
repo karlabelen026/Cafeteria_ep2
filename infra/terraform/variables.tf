@@ -9,9 +9,9 @@ variable "region" {
 }
 
 variable "instance_type" {
-  description = "Tipo de instancia EC2 que corre los 11 contenedores (8 ms + bff + notificaciones+admin) con Docker Compose."
+  description = "Tipo de instancia EC2 que corre los 11 contenedores (8 ms + bff + notificaciones+admin) con Docker Compose. t3.large (8 GB) se queda sin memoria: RabbitMQ dispara su alarma de memoria (system_memory_high_watermark) con los 3 nodos + 11 JVMs + Postgres corriendo juntos; t3.xlarge (16 GB) da margen real."
   type        = string
-  default     = "t3.large"
+  default     = "t3.xlarge"
 }
 
 variable "key_name" {
