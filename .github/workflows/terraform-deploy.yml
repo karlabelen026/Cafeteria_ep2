@@ -76,9 +76,23 @@ jobs:
           TF_VAR_rabbitmq_password: ${{ secrets.RABBITMQ_PASSWORD }}
           TF_VAR_rabbitmq_erlang_cookie: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
           TF_VAR_enable_recovery_alarms: ${{ secrets.ENABLE_RECOVERY_ALARMS || 'true' }}
+          TF_VAR_duckdns_domain: ${{ secrets.DUCKDNS_DOMAIN }}
 
       - name: terraform apply (crea/actualiza las 2 EC2, el volumen EBS, el API Gateway y el resto de la infraestructura AWS)
         run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Actualizar DuckDNS con la Elastic IP actual del frontend
+        run: |
+          if [ -z "$DUCKDNS_DOMAIN" ]; then
+            echo "DUCKDNS_DOMAIN no esta configurado, se omite (se sigue usando la Elastic IP directamente)."
+            exit 0
+          fi
+          IP=$(terraform output -raw frontend_elastic_ip)
+          SUBDOMINIO="${DUCKDNS_DOMAIN%%.*}"
+          curl -fsS "https://www.duckdns.org/update?domains=${SUBDOMINIO}&token=${DUCKDNS_TOKEN}&ip=${IP}"
+        env:
+          DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
+          DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
 
       - name: Publicar outputs en el resumen del job
         run: |

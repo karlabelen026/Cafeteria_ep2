@@ -15,6 +15,16 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# Nombre publico del frontend: el dominio de DuckDNS si esta configurado
+# (ver variables.tf, duckdns_domain), o la propia Elastic IP si no. Se usa en
+# el certificado autofirmado, en VITE_AZURE_REDIRECT_URI y en el
+# FRONTEND_ORIGIN (CORS) del backend, para que ninguno de los tres tenga que
+# tocarse a mano cuando la IP cambia entre sesiones del Learner Lab (ver
+# terraform-deploy.yml, paso "Actualizar DuckDNS").
+locals {
+  frontend_hostname = var.duckdns_domain != "" ? var.duckdns_domain : aws_eip.frontend.public_ip
+}
+
 # Secreto que el BFF exige en el header "X-Origin-Verify" (ver
 # OriginVerifyGlobalFilter en bff-gateway) para rechazar quien le pegue
 # directo al puerto 8080 saltándose el API Gateway (prueba S8).
@@ -145,7 +155,7 @@ resource "aws_instance" "backend" {
   user_data = templatefile("${path.module}/user_data_backend.sh.tftpl", {
     repo_url                = var.repo_url
     repo_branch             = var.repo_branch
-    frontend_eip            = aws_eip.frontend.public_ip
+    frontend_hostname       = local.frontend_hostname
     db_password             = var.db_password
     rabbitmq_password       = var.rabbitmq_password
     rabbitmq_erlang_cookie  = var.rabbitmq_erlang_cookie
@@ -199,6 +209,7 @@ resource "aws_instance" "frontend" {
     repo_url                 = var.repo_url
     repo_branch              = var.repo_branch
     eip                      = aws_eip.frontend.public_ip
+    frontend_hostname        = local.frontend_hostname
     azure_tenant_id          = var.azure_tenant_id
     azure_frontend_client_id = var.azure_frontend_client_id
     azure_backend_client_id  = var.azure_backend_client_id

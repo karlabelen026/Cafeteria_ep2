@@ -56,14 +56,22 @@ chown -R ubuntu:ubuntu "$APP_DIR"
 
 # ── Certificado autofirmado para nginx (HTTPS en 443, ver
 # cafeteria-frontend/.../docker-entrypoint.sh: busca fullchain.pem/privkey.pem
-# montados en /etc/nginx/certs) ───────────────────────────────────────────────
+# montados en /etc/nginx/certs). CN = dominio de DuckDNS si esta configurado
+# (ver main.tf, local.frontend_hostname), si no la propia Elastic IP. El SAN
+# siempre incluye la IP ademas del dominio (si difieren) para que entrar por
+# cualquiera de las dos formas funcione mientras el DNS propaga. ─────────────
 mkdir -p "$CERT_DIR"
 if [ ! -f "$CERT_DIR/fullchain.pem" ]; then
+  if [ "${frontend_hostname}" = "${eip}" ]; then
+    SAN="IP:${eip}"
+  else
+    SAN="DNS:${frontend_hostname},IP:${eip}"
+  fi
   openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
     -keyout "$CERT_DIR/privkey.pem" \
     -out "$CERT_DIR/fullchain.pem" \
-    -subj "/CN=${eip}" \
-    -addext "subjectAltName=IP:${eip}"
+    -subj "/CN=${frontend_hostname}" \
+    -addext "subjectAltName=$SAN"
 fi
 chown -R ubuntu:ubuntu "$CERT_DIR"
 
@@ -77,7 +85,7 @@ VITE_AUTH_DISABLED=false
 VITE_AZURE_CLIENT_ID=${azure_frontend_client_id}
 VITE_AZURE_TENANT_ID=${azure_tenant_id}
 VITE_AZURE_AUTHORITY=${azure_authority}
-VITE_AZURE_REDIRECT_URI=https://${eip}
+VITE_AZURE_REDIRECT_URI=https://${frontend_hostname}
 VITE_API_SCOPES=api://${azure_backend_client_id}/pedidos.read,api://${azure_backend_client_id}/pedidos.write
 ENV_EOF
 chown ubuntu:ubuntu "$APP_DIR/.env"

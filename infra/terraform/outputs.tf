@@ -9,8 +9,8 @@ output "backend_elastic_ip" {
 }
 
 output "frontend_url" {
-  description = "URL del frontend (nginx en su propia EC2, HTTPS con certificado autofirmado: el navegador pedirá aceptar la excepción)."
-  value       = "https://${aws_eip.frontend.public_ip}"
+  description = "URL del frontend (nginx en su propia EC2, HTTPS con certificado autofirmado: el navegador pedirá aceptar la excepción). Usa el dominio de DuckDNS si está configurado (duckdns_domain) — no cambia aunque la Elastic IP sí lo haga."
+  value       = "https://${local.frontend_hostname}"
 }
 
 output "api_gateway_url" {

@@ -93,7 +93,7 @@ AZURE_AUDIENCES=${azure_backend_client_id},api://${azure_backend_client_id}
 AZURE_JWK_SET_URI=${azure_jwk_set_uri}
 
 # Origen permitido para CORS: la instancia de frontend (nginx), no esta misma.
-FRONTEND_ORIGIN=https://${frontend_eip}
+FRONTEND_ORIGIN=https://${frontend_hostname}
 ORIGIN_VERIFY_SECRET=${origin_verify_secret}
 
 DB_PASSWORD=${db_password}

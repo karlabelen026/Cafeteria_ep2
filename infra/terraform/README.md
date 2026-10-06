@@ -163,6 +163,7 @@ restricciones del Learner Lab.
 | `AZURE_JWK_SET_URI`, `AZURE_AUTHORITY` | solo tenants External ID (ciamlogin); dejalos vacíos si no aplica |
 | `DB_PASSWORD`, `RABBITMQ_PASSWORD`, `RABBITMQ_ERLANG_COOKIE` | passwords de MySQL y RabbitMQ |
 | `ENABLE_RECOVERY_ALARMS` | opcional, default `true` |
+| `DUCKDNS_DOMAIN`, `DUCKDNS_TOKEN` | opcionales — dominio completo (ej. `cafegestion360.duckdns.org`) y token de una cuenta gratuita en [duckdns.org](https://www.duckdns.org). Si están, la URL del frontend (y el redirect de Azure, y el CORS del backend) queda fija en ese dominio en vez de la Elastic IP — necesario porque el Learner Lab puede darte una Elastic IP (o hasta una cuenta de AWS) nueva en cada sesión. El workflow actualiza el registro DNS a la IP actual después de cada `apply`. Vacíos = se sigue usando la Elastic IP directamente. |
 
 `repo_url` **no** es un secret: el workflow lo arma solo con
 `https://github.com/<owner>/<repo>.git` (`github.repository`), así que la

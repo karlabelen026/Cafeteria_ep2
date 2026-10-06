@@ -29,3 +29,9 @@ rabbitmq_password      = "<PASSWORD_RABBITMQ>"
 rabbitmq_erlang_cookie = "<COOKIE_ERLANG_UNICA_Y_SECRETA>"
 
 enable_recovery_alarms = true
+
+# Opcional: cuenta gratuita en duckdns.org, para que la URL del frontend
+# no cambie entre sesiones del Learner Lab. Vacio = se usa la Elastic IP
+# directamente. El token de DuckDNS NO va aqui: es un secret del workflow
+# (DUCKDNS_TOKEN), ver infra/terraform/README.md.
+duckdns_domain = ""

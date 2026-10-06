@@ -76,13 +76,22 @@ function useApiClientMsal() {
 
   async function callApi(path, options = {}) {
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-    const token = await getToken();
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    // Rutas /public/** (tienda, checkout) nunca exigen JWT: no hay que
+    // intentar adjuntar un token aqui. Si un staff logueado navega a la
+    // tienda y la renovacion silenciosa de SU token falla, acquireTokenRedirect
+    // saca de la pagina a mitad del checkout (redirect de ventana completa)
+    // sin ningun error visible, perdiendo el carrito con el pedido a medio
+    // enviar — por eso antes "no pasaba nada" al pagar estando logueada.
+    const esPublica = path.startsWith('/public/');
+    if (!esPublica) {
+      const token = await getToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
     }
     const response = await fetch(`${apiBaseUrl}${path}`, { ...options, headers });
 
-    if (response.status === 401) {
+    if (response.status === 401 && !esPublica) {
       // El token expiro o ya no es valido: se fuerza un nuevo login en vez de
       // dejar que la pagina se quede mostrando datos vacios silenciosamente
       // (ver docs/EP2_PLAN.md seccion 6.1).

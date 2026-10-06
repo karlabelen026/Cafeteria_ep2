@@ -104,6 +104,12 @@ variable "rabbitmq_erlang_cookie" {
   sensitive   = true
 }
 
+variable "duckdns_domain" {
+  description = "Dominio completo de DuckDNS (ej. \"cafegestion360.duckdns.org\", cuenta gratuita en duckdns.org) para que la URL del frontend, el redirect de Azure y el CORS del backend no tengan que cambiar cada vez que el AWS Academy Learner Lab da una Elastic IP (o una cuenta) nueva. Vacio = se usa la Elastic IP directamente (comportamiento anterior). El token de DuckDNS NO es una variable de Terraform: el workflow terraform-deploy.yml lo usa directo (secret DUCKDNS_TOKEN) para actualizar el registro DNS despues de cada apply, ver infra/terraform/README.md."
+  type        = string
+  default     = ""
+}
+
 variable "enable_recovery_alarms" {
   description = "Crea las alarmas CloudWatch de recuperación/reinicio automático (monitoring.tf). Desactívalo si el Learner Lab no permite acciones de alarma \"aws:recover\"/\"aws:reboot\"."
   type        = bool
