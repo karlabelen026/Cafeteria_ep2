@@ -663,15 +663,23 @@ Archivos nuevos en [`infra/terraform/`](infra/terraform/) (detalle completo en s
 | `terraform.tfvars.example` | ejemplo sin secretos reales |
 | `backend.tf` + `init-backend.sh` | backend remoto (S3 + bloqueo DynamoDB) para que el state no viva solo en un disco: imprescindible para que GitHub Actions (runners nuevos en cada corrida) y tu máquina local compartan el mismo state |
 
-### CI/CD: `.github/workflows/terraform-deploy.yml` y `terraform-destroy.yml`
+### CI/CD: `.github/workflows/ci.yml`, `terraform-deploy.yml` y `terraform-destroy.yml`
 
-Dos workflows, **ambos solo con disparo manual** (`workflow_dispatch`): las credenciales temporales de
-AWS Academy Learner Lab duran unas pocas horas, así que correrlos en cada push fallaría la mayoría de las
-veces y además re-aplicaría infraestructura real sin que nadie lo pidiera. `terraform-deploy.yml` corre
-`plan` + `apply` y publica la IP/URLs en el resumen del job; `terraform-destroy.yml` corre `destroy` y pide
-escribir `destruir` para confirmar. Ambos arrancan con `init-backend.sh` (crean el bucket S3 y la tabla
-DynamoDB si no existen) para no duplicar infraestructura entre corridas. Detalle de los secrets necesarios
-(`AWS_ACCESS_KEY_ID`, `MY_IP_CIDR`, los datos de Azure, los passwords) en
+**CI (Integración Continua)** — [`ci.yml`](.github/workflows/ci.yml): corre en cada push y cada pull
+request, a cualquier rama, sin necesitar ningún secret. Compila el backend (`mvnw clean verify`) y el
+frontend (`npm run build`) y corre las pruebas, para detectar errores apenas se suben.
+
+**CD (Entrega/Despliegue Continuo)** — `terraform-deploy.yml` y `terraform-destroy.yml`, **ambos solo con
+disparo manual** (`workflow_dispatch`): las credenciales temporales de AWS Academy Learner Lab duran unas
+pocas horas, así que correrlos en cada push fallaría la mayoría de las veces y además re-aplicaría
+infraestructura real sin que nadie lo pidiera — por eso es **Entrega Continua** (el código queda listo
+para desplegar, pero alguien aprueba el lanzamiento con "Run workflow"), no Despliegue Continuo puro.
+`terraform-deploy.yml` corre `plan` + `apply` (crea/actualiza las 2 EC2 de backend y frontend, el volumen
+EBS de MySQL y el API Gateway) y publica la IP/URLs en el resumen del job — cada EC2 después arranca sola
+su propio `docker compose up --build`, sin intervención manual; `terraform-destroy.yml` corre `destroy` y
+pide escribir `destruir` para confirmar. Ambos arrancan con `init-backend.sh` (crean el bucket S3 y la
+tabla DynamoDB si no existen) para no duplicar infraestructura entre corridas. Detalle de los secrets
+necesarios (`AWS_ACCESS_KEY_ID`, `MY_IP_CIDR`, los datos de Azure, los passwords) en
 [`infra/terraform/README.md`](infra/terraform/README.md#secrets-necesarios-en-el-repo).
 
 ### RabbitMQ en el dashboard

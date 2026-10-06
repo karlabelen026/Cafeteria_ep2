@@ -27,6 +27,7 @@ concurrency:
 
 jobs:
   deploy:
+    name: Desplegar infraestructura AWS + Docker Compose (backend y frontend)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -76,7 +77,7 @@ jobs:
           TF_VAR_rabbitmq_erlang_cookie: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
           TF_VAR_enable_recovery_alarms: ${{ secrets.ENABLE_RECOVERY_ALARMS || 'true' }}
 
-      - name: terraform apply
+      - name: terraform apply (crea/actualiza las 2 EC2, el volumen EBS, el API Gateway y el resto de la infraestructura AWS)
         run: terraform apply -input=false -auto-approve tfplan
 
       - name: Publicar outputs en el resumen del job
@@ -87,5 +88,9 @@ jobs:
             terraform output
             echo '```'
             echo
-            echo "El primer arranque tarda 10-15 min en compilar todo (ver /var/log/cloud-init-output.log en la EC2)."
+            echo "**Qué hizo este workflow (CI/CD, 2 etapas):**"
+            echo "1. Terraform (los pasos de arriba) creó o actualizó la infraestructura AWS: la EC2 de backend, la EC2 de frontend, el volumen EBS de MySQL y el API Gateway."
+            echo "2. Cada EC2 corre sola, al arrancar, un script (\`user_data\`) que instala Docker y ejecuta \`docker compose up --build\`: la de backend levanta MySQL + RabbitMQ + los 9 microservicios + bff-gateway; la de frontend levanta nginx con el build de React. Esto es automático, sin SSH ni intervención manual."
+            echo
+            echo "El primer arranque de la EC2 de backend tarda 10-15 min en compilar todo (el de frontend, 2-3 min). Podés seguirlo con 'sudo tail -f /var/log/cloud-init-output.log' por SSH, o simplemente esperar y recargar el sitio."
           } >> "$GITHUB_STEP_SUMMARY"

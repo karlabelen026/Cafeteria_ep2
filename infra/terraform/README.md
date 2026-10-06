@@ -108,11 +108,28 @@ terraform destroy
 
 ## CI/CD con GitHub Actions
 
-Dos workflows en [`.github/workflows/`](../../.github/workflows/), **ambos
-solo con disparo manual** (`workflow_dispatch`): las credenciales de AWS
-Academy Learner Lab duran unas pocas horas, así que automatizarlos en cada
-push fallaría la mayoría de las veces y además re-aplicaría infraestructura
-real sin que nadie lo pidiera.
+**CI (Integración Continua)**: en cada push y cada pull request, a cualquier
+rama, [`ci.yml`](../../.github/workflows/ci.yml) compila el backend
+(`mvnw clean verify`) y el frontend (`npm run build`) y corre las pruebas —
+detecta errores de inmediato, sin necesitar ningún secret ni tocar AWS.
+
+**CD (Entrega/Despliegue Continuo)**: una vez que el código pasó CI, estos
+dos workflows son los que preparan o aplican la infraestructura real en AWS:
+
+| Workflow | Qué hace |
+|---|---|
+| `terraform-deploy.yml` | **Etapa 1** — `terraform plan` + `apply` contra AWS: crea/actualiza las 2 EC2 (backend y frontend), el volumen EBS de MySQL y el API Gateway. **Etapa 2** (automática, no es un paso de este workflow) — cada EC2, al arrancar, corre sola `docker compose up --build`: la de backend levanta MySQL + RabbitMQ + los 9 microservicios + bff-gateway; la de frontend levanta nginx. Pide confirmar la rama que la EC2 va a clonar (`repo_branch`, por defecto `deploy`) y, opcionalmente, `replace_target` (ej. `aws_instance.backend`) para forzar el reemplazo de un recurso puntual sin tocar el resto. Publica los outputs (IPs, URLs) en el resumen del job. |
+| `terraform-destroy.yml` | `terraform destroy`. Pide escribir literalmente `destruir` en el input `confirmar` para evitar un click accidental. |
+
+Los dos son **solo con disparo manual** (`workflow_dispatch`), no en cada
+push: eso técnicamente lo hace **Entrega Continua** (el código queda listo
+para desplegar, pero alguien aprueba el lanzamiento con "Run workflow"), no
+**Despliegue Continuo** puro (que aplicaría sin que nadie lo apruete). La
+razón es concreta: las credenciales de AWS Academy Learner Lab expiran cada
+pocas horas, así que automatizarlo en cada push fallaría la mayoría de las
+veces y además re-aplicaría infraestructura real sin que nadie lo pidiera —
+no es una limitación del pipeline, es una decisión deliberada por las
+restricciones del Learner Lab.
 
 | Workflow | Qué hace |
 |---|---|

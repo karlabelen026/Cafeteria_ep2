@@ -1,0 +1,59 @@
+name: CI - Build y pruebas
+
+# Integracion Continua: corre en cada push y cada pull request, sin tocar
+# AWS (no necesita ningun secret). Compila el backend y el frontend y corre
+# las pruebas, para detectar errores apenas se suben, antes de que alguien
+# dispare un deploy real con terraform-deploy.yml (ver infra/terraform/README.md,
+# seccion "CI/CD con GitHub Actions").
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (mvnw clean verify)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cafeteria-backend/cafeteria-backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: mvnw clean verify
+        run: ./mvnw -q clean verify
+
+  frontend:
+    name: Frontend (npm run build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cafeteria-frontend/cafeteria-frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: cafeteria-frontend/cafeteria-frontend/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: npm run build
+        run: npm run build
