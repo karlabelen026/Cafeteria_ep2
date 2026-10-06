@@ -18,7 +18,7 @@ x-backend-common: &backend-common
   # (p.ej. la EC2 t3.large de la Fase 6) se matan entre si por OOM si no se
   # les pone techo (ver docs/EP2_PLAN.md seccion 8.1).
   mem_limit: 512m
-  environment:
+  environment: &backend-common-env
     SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE-noauth}
     JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
     DB_URL: jdbc:mysql://mysql:3306/cafeteria?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
@@ -171,6 +171,9 @@ services:
     container_name: ms-inventario
     ports:
       - "8082:8082"
+    environment:
+      <<: *backend-common-env
+      MS_PEDIDOS_URL: http://ms-pedidos:8083
     volumes:
       - ms_inventario_data:/app/data
     depends_on:
@@ -194,6 +197,12 @@ services:
     container_name: ms-pedidos
     ports:
       - "8083:8083"
+    environment:
+      <<: *backend-common-env
+      # Valida precios/existencia de cada producto del carrito contra
+      # ms-productos antes de confiar en lo que mando el navegador (ver
+      # Checkout.jsx y docs/EP2_PLAN.md seccion 5).
+      MS_PRODUCTOS_URL: http://ms-productos:8081
     volumes:
       - ms_pedidos_data:/app/data
     depends_on:
@@ -217,6 +226,9 @@ services:
     container_name: ms-clientes
     ports:
       - "8084:8084"
+    environment:
+      <<: *backend-common-env
+      MS_PEDIDOS_URL: http://ms-pedidos:8083
     volumes:
       - ms_clientes_data:/app/data
     depends_on:
@@ -332,6 +344,9 @@ services:
     container_name: ms-notificaciones
     ports:
       - "8089:8089"
+    environment:
+      <<: *backend-common-env
+      MS_PEDIDOS_URL: http://ms-pedidos:8083
     volumes:
       - ms_notificaciones_data:/app/data
     depends_on:
