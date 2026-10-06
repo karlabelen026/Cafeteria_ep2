@@ -144,6 +144,16 @@ resource "aws_instance" "backend" {
   iam_instance_profile   = var.iam_instance_profile
   vpc_security_group_ids = [aws_security_group.backend.id]
 
+  # Sin esto, un cambio de user_data NO reemplaza la instancia: el provider
+  # para la instancia, le actualiza el atributo user-data (API de AWS exige
+  # pararla para eso) y la vuelve a prender con el MISMO instance-id. Pero
+  # cloud-init solo corre el user_data una vez por instance-id (lo rastrea el
+  # el propio SO) — al reiniciar NO lo vuelve a ejecutar, asi que el .env y
+  # el certificado se quedan con el contenido del primer boot. Con esto en
+  # true, un cambio de user_data siempre destruye y crea la instancia de
+  # nuevo, garantizando que cloud-init corre con el contenido actualizado.
+  user_data_replace_on_change = true
+
   root_block_device {
     volume_type = "gp3"
     # 50 GB: "docker compose build" de los 10 contenedores (8 ms + bff +
@@ -199,6 +209,9 @@ resource "aws_instance" "frontend" {
   key_name               = var.key_name
   iam_instance_profile   = var.iam_instance_profile
   vpc_security_group_ids = [aws_security_group.frontend.id]
+
+  # Ver el comentario identico en aws_instance.backend.
+  user_data_replace_on_change = true
 
   root_block_device {
     volume_type = "gp3"
