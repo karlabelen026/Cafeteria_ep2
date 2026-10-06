@@ -55,6 +55,7 @@ app:
       pagos: cafeteria.pagos.exchange
       inventario: cafeteria.inventario.exchange
       pedidos: cafeteria.pedidos.exchange
+      chat: cafeteria.chat.exchange
       dlx: cafeteria.dlx
     routing-keys:
       pago-aprobado: pago.aprobado
@@ -63,6 +64,7 @@ app:
     queues:
       ticket: notificaciones.ticket.queue
       alertas: notificaciones.alertas.queue
+      chat: notificaciones.chat.queue
     policies:
       delivery-limit: 3
       message-ttl-ms: 600000

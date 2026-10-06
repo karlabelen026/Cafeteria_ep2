@@ -745,3 +745,123 @@
     padding: 16px;
   }
 }
+
+/* ---------- Chat del equipo ---------- */
+.chat-card {
+  background: var(--dash-surface);
+  border: 1px solid var(--dash-border);
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+  display: flex;
+  flex-direction: column;
+  height: min(620px, 70vh);
+  overflow: hidden;
+}
+
+.chat-card__lista {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chat-card__vacio {
+  margin: auto;
+  color: var(--dash-text-muted);
+  font-size: 0.9rem;
+}
+
+.chat-msg {
+  display: flex;
+  gap: 10px;
+  max-width: 78%;
+}
+
+.chat-msg--propio {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.chat-msg__avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--dash-espresso);
+  color: var(--dash-crema);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.chat-msg__cuerpo {
+  background: var(--dash-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+
+.chat-msg--propio .chat-msg__cuerpo {
+  background: var(--dash-latte);
+}
+
+.chat-msg__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.chat-msg__meta strong {
+  font-size: 0.82rem;
+  color: var(--dash-espresso);
+}
+
+.chat-msg__rol {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dash-text-muted);
+}
+
+.chat-msg__cuerpo p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.chat-msg__pendiente {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: var(--dash-text-muted);
+  font-style: italic;
+}
+
+.chat-card__form {
+  display: flex;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--dash-border);
+  background: var(--dash-surface);
+}
+
+.chat-card__form input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--dash-border);
+  background: var(--dash-bg);
+  font-family: var(--dash-font-ui);
+  font-size: 0.92rem;
+}
+
+.chat-card__form input:focus {
+  outline: none;
+  border-color: var(--dash-caramelo);
+}

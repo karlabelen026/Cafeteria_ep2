@@ -22,7 +22,9 @@ import org.slf4j.LoggerFactory;
  *   cafeteria.pedidos.exchange   (topic)  --[pedido.estado.actualizado]-+--> notificaciones.alertas.queue
  *     -> AlertaListener (alerta STOCK_BAJO / PEDIDO_LISTO; fallidos sin reintento -> notificaciones.alertas.queue.dlq)
  *
- * Este servicio no publica ningun evento.
+ * PUBLICA Y CONSUME (chat interno del equipo, ver docs/EP2_PLAN.md seccion 6.2):
+ *   cafeteria.chat.exchange (fanout, sin routing key) --> notificaciones.chat.queue
+ *     -> ChatListener (persiste el mensaje; fallidos sin reintento -> notificaciones.chat.queue.dlq)
  */
 @Configuration
 @EnableConfigurationProperties(RabbitProperties.class)
@@ -102,6 +104,32 @@ public class RabbitMQConfig {
     public Binding alertasDlqBinding() {
         return BindingBuilder.bind(alertasDlq()).to(dlx())
                 .with(props.getQueues().get("alertas") + ".dlq");
+    }
+
+    @Bean
+    public FanoutExchange chatExchange() {
+        return new FanoutExchange(props.getExchanges().get("chat"), true, false);
+    }
+
+    @Bean
+    public Queue chatQueue() {
+        return colaPrincipal("chat");
+    }
+
+    @Bean
+    public Queue chatDlq() {
+        return colaDlq("chat");
+    }
+
+    @Bean
+    public Binding chatBinding() {
+        return BindingBuilder.bind(chatQueue()).to(chatExchange());
+    }
+
+    @Bean
+    public Binding chatDlqBinding() {
+        return BindingBuilder.bind(chatDlq()).to(dlx())
+                .with(props.getQueues().get("chat") + ".dlq");
     }
 
     private Queue colaPrincipal(String clave) {

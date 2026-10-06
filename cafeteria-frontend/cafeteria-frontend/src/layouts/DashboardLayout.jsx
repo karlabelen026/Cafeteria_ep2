@@ -28,6 +28,7 @@ const NAV_GROUPS = [
       { to: '/dashboard/recetas', label: 'Recetas', icon: '📖', roles: ['ADMIN', 'GERENTE', 'BODEGUERO'] },
       { to: '/dashboard/clientes', label: 'Clientes', icon: '👥', roles: ['ADMIN', 'GERENTE', 'BARISTA', 'CAJERO'] },
       { to: '/dashboard/pagos', label: 'Pagos', icon: '💳', roles: ['ADMIN', 'GERENTE', 'CAJERO'] },
+      { to: '/dashboard/chat', label: 'Chat del equipo', icon: '💬', roles: null },
     ],
   },
   {
