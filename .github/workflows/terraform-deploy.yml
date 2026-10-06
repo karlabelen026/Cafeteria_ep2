@@ -14,7 +14,7 @@ on:
         required: false
         default: "deploy"
       replace_target:
-        description: "Opcional: direccion de un recurso para forzar su reemplazo (ej. aws_instance.backend), para probar un boot limpio sin perder datos (el volumen EBS de MySQL no es parte de la instancia)"
+        description: "Opcional: direccion de uno o mas recursos (separados por coma) para forzar su reemplazo, ej. aws_instance.backend,aws_instance.frontend. Util para probar un boot limpio sin perder datos (el volumen EBS de MySQL no es parte de la instancia) o cuando terraform plan no detecta que una instancia necesita recrearse."
         required: false
         default: ""
 
@@ -57,12 +57,16 @@ jobs:
 
       - name: terraform plan
         run: |
-          if [ -n "${{ github.event.inputs.replace_target }}" ]; then
-            terraform plan -input=false -replace="${{ github.event.inputs.replace_target }}" -out=tfplan
-          else
-            terraform plan -input=false -out=tfplan
+          REPLACE_FLAGS=()
+          if [ -n "$REPLACE_TARGET" ]; then
+            IFS=',' read -ra TARGETS <<< "$REPLACE_TARGET"
+            for t in "${TARGETS[@]}"; do
+              REPLACE_FLAGS+=(-replace="$t")
+            done
           fi
+          terraform plan -input=false "${REPLACE_FLAGS[@]}" -out=tfplan
         env:
+          REPLACE_TARGET: ${{ github.event.inputs.replace_target }}
           TF_VAR_my_ip_cidr: ${{ secrets.MY_IP_CIDR }}
           TF_VAR_repo_url: https://github.com/${{ github.repository }}.git
           TF_VAR_repo_branch: ${{ github.event.inputs.repo_branch }}
