@@ -36,8 +36,16 @@ export default function Footer() {
               <h4>Tienda</h4>
               <ul>
                 <li><Link to="/">Ver menú</Link></li>
+                <li><a href="#novedades">Novedades</a></li>
                 <li><a href="#about">Quiénes somos</a></li>
-                <li><a href="#about">Visión y misión</a></li>
+              </ul>
+            </div>
+
+            <div className="site-footer__col">
+              <h4>Visítanos</h4>
+              <ul>
+                <li><a href="#ubicaciones">Ubicaciones</a></li>
+                <li><a href="#resenas">Reseñas</a></li>
               </ul>
             </div>
 

@@ -7,6 +7,10 @@ import CartIcon from '../components/CartIcon';
 import ProductVisual from '../components/ProductVisual';
 import CartDrawer from '../components/CartDrawer';
 import AboutSection from '../components/AboutSection';
+import HeroCarousel from '../components/HeroCarousel';
+import ReviewsSection from '../components/ReviewsSection';
+import LocationsSection from '../components/LocationsSection';
+import NewsSection from '../components/NewsSection';
 import Footer from '../components/Footer';
 
 // Etiquetas puramente decorativas (no vienen del backend, no hay campo de
@@ -101,6 +105,7 @@ export default function Store() {
       </header>
 
       <section className="promo-banner">
+        <HeroCarousel />
         <div className="promo-banner__text">
           <span className="hero__eyebrow">Oferta del día</span>
           <h1>{destacado ? destacado.nombre : 'Bienvenido a CafeGestión360'}</h1>
@@ -201,6 +206,9 @@ export default function Store() {
       <div id="about">
         <AboutSection />
       </div>
+      <NewsSection />
+      <ReviewsSection />
+      <LocationsSection />
       <Footer />
 
       <CartDrawer open={carritoAbierto} onClose={() => setCarritoAbierto(false)} />
