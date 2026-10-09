@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../hooks/usePolling';
+import { ESTADOS_DE_PAGO, etiquetaEstado } from '../utils/estadosPedido';
 import { useApiClient } from '../services/apiClient';
 import { useToasts } from '../context/ToastContext.jsx';
 import { useUserRole } from '../hooks/useUserRole';
@@ -9,12 +11,10 @@ import { badgeClassForEstado } from '../utils/badges';
 // (vuelve a validarlo y responde 409 si no corresponde); esto solo evita
 // ofrecer opciones que de entrada van a fallar.
 const TRANSICIONES = {
-  PENDIENTE_PAGO: ['PAGADO', 'PAGO_RECHAZADO'],
   PAGADO: ['EN_PREPARACION', 'CANCELADO'],
   EN_PREPARACION: ['LISTO', 'CANCELADO'],
   LISTO: ['ENTREGADO'],
   ENTREGADO: [],
-  PAGO_RECHAZADO: [],
   CANCELADO: [],
 };
 
@@ -32,16 +32,21 @@ export default function Pedidos() {
   const [error, setError] = useState('');
   const [actualizando, setActualizando] = useState(null);
 
-  useEffect(() => {
+  // La confirmacion del pago se resuelve sola por mensajeria (RabbitMQ) y se
+  // revisa en "Pagos": aqui solo se listan los pedidos que ya entraron a la
+  // barra (Pendiente -> En preparación -> Listo -> Entregado).
+  usePolling(() => {
     callApi('/pedidos')
-      .then(setPedidos)
+      .then((data) => {
+        setPedidos((data || []).filter((p) => !ESTADOS_DE_PAGO.includes(p.estado)));
+        setError('');
+      })
       .catch((err) => {
         console.error(err);
         setError('No se pudieron cargar los pedidos (revisa el token o el backend).');
       })
       .finally(() => setCargando(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  });
 
   const cambiarEstado = async (pedido, nuevoEstado) => {
     setActualizando(pedido.id);
@@ -51,7 +56,7 @@ export default function Pedidos() {
         body: JSON.stringify({ nuevoEstado }),
       });
       setPedidos((prev) => prev.map((p) => (p.id === pedido.id ? actualizado : p)));
-      toasts.success(`Pedido ${pedido.codigoSeguimiento?.slice(0, 8) || pedido.id} actualizado a ${nuevoEstado}.`);
+      toasts.success(`Pedido ${pedido.codigoSeguimiento?.slice(0, 8) || pedido.id} pasó a ${etiquetaEstado(nuevoEstado)}.`);
     } catch (err) {
       console.error(err);
       toasts.error(err.message || `No se pudo actualizar el pedido.`);
@@ -123,7 +128,7 @@ export default function Pedidos() {
                     <td>{p.canal}</td>
                     <td>${p.total}</td>
                     <td>
-                      <span className={badgeClassForEstado(p.estado)}>{p.estado || 'Sin estado'}</span>
+                      <span className={badgeClassForEstado(p.estado)}>{etiquetaEstado(p.estado)}</span>
                     </td>
                     {(puedeCambiarEstado || puedeCancelar) && (
                       <td>
@@ -142,7 +147,7 @@ export default function Pedidos() {
                                 .filter((s) => s !== 'CANCELADO')
                                 .map((estado) => (
                                   <option key={estado} value={estado}>
-                                    {estado}
+                                    {etiquetaEstado(estado)}
                                   </option>
                                 ))}
                             </select>

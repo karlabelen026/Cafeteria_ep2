@@ -10,36 +10,32 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 /**
- * Cliente HTTP hacia ms-pedidos para obtener el snapshot de cliente
- * (nombre/email) de un pedido ya pagado (ver docs/EP2_PLAN.md seccion 5):
- * PagoProcesadoEvent solo trae pedidoId, no el nombre/email del cliente, asi
- * que hay que ir a buscarlos a ms-pedidos antes de poder hacer el upsert.
+ * Cliente HTTP hacia ms-pedidos para obtener los datos de cliente
+ * (nombre/email) de un pedido pagado y asi sumarle puntos de fidelizacion.
  *
- * LIMITACION CONOCIDA (arquitectonica, no un bug de este archivo): ms-pedidos
- * exige un JWT valido para GET /api/pedidos/{id} (ver su SecurityConfig:
- * "anyRequest().authenticated()", sin excepcion para ese endpoint), pero este
- * cliente se invoca desde un listener de mensajeria (PagoAprobadoListener),
- * es decir sin usuario logueado ni token. El proyecto todavia no tiene
- * autenticacion servicio-a-servicio (p.ej. OAuth2 client-credentials con un
- * "client" tecnico para llamadas internas entre microservicios). Mientras eso
- * no se implemente, un 401/403 aqui se trata como error TRANSITORIO
- * (RecoverableMessageException): el mensaje se reintenta y queda visible en
- * los logs en vez de perderse silenciosamente o irse directo a la DLQ. Esto
- * es un parche razonable, no la solucion definitiva.
+ * Es una llamada servicio-a-servicio (la dispara un listener de RabbitMQ, sin
+ * usuario logueado): usa el endpoint interno /internal/pedidos/{id} de
+ * ms-pedidos y se autentica con el secreto compartido X-Internal-Token.
  */
 @Component
 public class PedidoClient {
 
+    private static final String HEADER_TOKEN_INTERNO = "X-Internal-Token";
+
     private final RestClient restClient;
 
-    public PedidoClient(@Value("${app.clients.pedidos-url:http://localhost:8083}") String pedidosUrl) {
-        this.restClient = RestClient.builder().baseUrl(pedidosUrl).build();
+    public PedidoClient(@Value("${app.clients.pedidos-url:http://localhost:8083}") String pedidosUrl,
+            @Value("${app.security.internal-token}") String tokenInterno) {
+        this.restClient = RestClient.builder()
+                .baseUrl(pedidosUrl)
+                .defaultHeader(HEADER_TOKEN_INTERNO, tokenInterno)
+                .build();
     }
 
     public PedidoDto obtener(Long pedidoId) {
         try {
             return restClient.get()
-                    .uri("/api/pedidos/{id}", pedidoId)
+                    .uri("/internal/pedidos/{id}", pedidoId)
                     .retrieve()
                     .body(PedidoDto.class);
         } catch (RestClientResponseException e) {

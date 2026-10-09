@@ -2,16 +2,16 @@ spring:
   application:
     name: ms-inventario
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/cafeteria?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC}
+    # Cada microservicio usa SU PROPIA base de datos MySQL (la crea y le da
+    # permisos el servicio mysql-init de docker-compose.yml). En MySQL,
+    # hibernate.default_schema no tiene efecto: la base se elige en la URL.
+    url: ${DB_URL:jdbc:mysql://${DB_HOST:localhost}:3306/inventario?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC}
     username: ${DB_USER:cafeteria}
     password: ${DB_PASSWORD:cafeteria}
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: false
-    properties:
-      hibernate:
-        default_schema: inventario
   # NOTA: issuer-uri / audiences / jwk-set-uri NO se configuran aqui bajo
   # spring.security.oauth2.resourceserver.jwt.* — SecurityConfig.java arma su
   # propio bean JwtDecoder leyendo AZURE_ISSUER_URI / AZURE_JWK_SET_URI /
@@ -45,6 +45,10 @@ management:
 app:
   security:
     enabled: true
+    # Secreto compartido para llamadas servicio-a-servicio (header
+    # X-Internal-Token, ver ms-pedidos InternalTokenFilter). Debe ser el
+    # mismo valor en todos los microservicios (variable INTERNAL_API_TOKEN).
+    internal-token: ${INTERNAL_API_TOKEN:cafeteria-interno-local}
   clients:
     # URL base de ms-pedidos, usada por PedidoClient para resolver los items
     # de un pedido pagado (ver docs/EP2_PLAN.md seccion 5 y PedidoClient).

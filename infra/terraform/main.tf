@@ -33,6 +33,13 @@ resource "random_password" "origin_verify_secret" {
   special = false
 }
 
+# Secreto compartido para las llamadas servicio-a-servicio (header
+# X-Internal-Token, ver ms-pedidos InternalTokenFilter).
+resource "random_password" "internal_api_token" {
+  length  = 32
+  special = false
+}
+
 resource "aws_security_group" "backend" {
   name        = "cafeteria360-backend-sg"
   description = "CafeGestion360 backend (MySQL, RabbitMQ, microservicios, bff-gateway): SSH y UI de RabbitMQ solo desde mi IP; 8080 publico para el API Gateway"
@@ -173,6 +180,7 @@ resource "aws_instance" "backend" {
     azure_backend_client_id = var.azure_backend_client_id
     azure_jwk_set_uri       = var.azure_jwk_set_uri
     origin_verify_secret    = random_password.origin_verify_secret.result
+    internal_api_token      = random_password.internal_api_token.result
   })
 
   tags = {
@@ -228,6 +236,7 @@ resource "aws_instance" "frontend" {
     azure_backend_client_id  = var.azure_backend_client_id
     azure_authority          = var.azure_authority
     api_gateway_url          = "${aws_apigatewayv2_api.app.api_endpoint}/api"
+    rabbitmq_dashboard_url   = "http://${aws_eip.backend.public_ip}:15672"
   })
 
   tags = {

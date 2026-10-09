@@ -136,7 +136,7 @@ export default function Checkout() {
               />
             </label>
             <p className="checkout-form__note">
-              Demo: termina en <code>0000</code> → pago rechazado · <code>9999</code> → error transitorio
+              Tarjetas de prueba: termina en <code>0000</code> → pago rechazado · <code>9999</code> → error transitorio
               (reintenta y cae a la DLQ) · <code>8888</code> → error directo a la DLQ.
             </p>
 

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { usePolling } from '../../../hooks/usePolling';
 import { useApiClient } from '../../../services/apiClient';
 
 const METODOS_ICONO = { EFECTIVO: '💵', DEBITO: '💳', CREDITO: '💳', TRANSFERENCIA: '🏦' };
@@ -22,15 +23,18 @@ export default function CajaDelDia() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  usePolling(() => {
     callApi('/pagos')
-      .then(setPagos)
+      .then((data) => {
+        setPagos(data || []);
+        setError('');
+      })
       .catch((err) => {
         console.error(err);
         setError('No se pudieron cargar los pagos (revisa el token o el backend).');
       })
       .finally(() => setCargando(false));
-  }, [callApi]);
+  });
 
   const pagosHoy = useMemo(
     () => pagos.filter((p) => p.estado === 'APROBADO' && esHoy(p.fecha)),

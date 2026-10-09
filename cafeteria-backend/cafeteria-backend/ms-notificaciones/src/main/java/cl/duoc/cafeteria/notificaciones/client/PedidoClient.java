@@ -11,30 +11,31 @@ import org.springframework.web.client.RestClientResponseException;
 
 /**
  * Cliente HTTP hacia ms-pedidos para obtener el detalle (items, codigo de
- * seguimiento, cliente) de un pedido pagado y armar el ticket (ver
- * docs/EP2_PLAN.md seccion 5): PagoProcesadoEvent solo trae pedidoId, monto y
- * metodoPago, no el detalle de items ni el codigo de seguimiento.
+ * seguimiento, cliente) de un pedido pagado y armar su boleta.
  *
- * LIMITACION CONOCIDA (arquitectonica, no un bug de este archivo): igual que
- * en ms-clientes/client/PedidoClient, ms-pedidos exige un JWT valido para
- * GET /api/pedidos/{id}, pero este cliente se invoca desde un listener de
- * mensajeria (TicketListener), sin usuario logueado ni token. Mientras no
- * exista autenticacion servicio-a-servicio, un 401/403 aqui se trata como
- * error TRANSITORIO (RecoverableMessageException).
+ * Es una llamada servicio-a-servicio (la dispara un listener de RabbitMQ, sin
+ * usuario logueado): usa el endpoint interno /internal/pedidos/{id} de
+ * ms-pedidos y se autentica con el secreto compartido X-Internal-Token.
  */
 @Component
 public class PedidoClient {
 
+    private static final String HEADER_TOKEN_INTERNO = "X-Internal-Token";
+
     private final RestClient restClient;
 
-    public PedidoClient(@Value("${app.clients.pedidos-url:http://localhost:8083}") String pedidosUrl) {
-        this.restClient = RestClient.builder().baseUrl(pedidosUrl).build();
+    public PedidoClient(@Value("${app.clients.pedidos-url:http://localhost:8083}") String pedidosUrl,
+            @Value("${app.security.internal-token}") String tokenInterno) {
+        this.restClient = RestClient.builder()
+                .baseUrl(pedidosUrl)
+                .defaultHeader(HEADER_TOKEN_INTERNO, tokenInterno)
+                .build();
     }
 
     public PedidoDto obtener(Long pedidoId) {
         try {
             return restClient.get()
-                    .uri("/api/pedidos/{id}", pedidoId)
+                    .uri("/internal/pedidos/{id}", pedidoId)
                     .retrieve()
                     .body(PedidoDto.class);
         } catch (RestClientResponseException e) {

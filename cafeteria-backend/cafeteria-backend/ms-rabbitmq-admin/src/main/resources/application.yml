@@ -44,6 +44,7 @@ app:
       - cafeteria.pedidos.exchange
       - cafeteria.pagos.exchange
       - cafeteria.inventario.exchange
+      - cafeteria.chat.exchange
       - cafeteria.dlx
       - pagos.pedido-creado.queue
       - pagos.pedido-creado.queue.dlq
@@ -61,3 +62,5 @@ app:
       - notificaciones.ticket.queue.dlq
       - notificaciones.alertas.queue
       - notificaciones.alertas.queue.dlq
+      - notificaciones.chat.queue
+      - notificaciones.chat.queue.dlq

@@ -21,7 +21,9 @@ x-backend-common: &backend-common
   environment: &backend-common-env
     SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE-noauth}
     JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
-    DB_URL: jdbc:mysql://mysql:3306/cafeteria?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
+    # Solo el host: cada microservicio agrega SU propia base de datos en la
+    # URL (ver spring.datasource.url en su application.yml y mysql-init abajo).
+    DB_HOST: mysql
     DB_USER: cafeteria
     DB_PASSWORD: ${DB_PASSWORD:-cafeteria}
     AZURE_ISSUER_URI: ${AZURE_ISSUER_URI:-https://login.microsoftonline.com/<TENANT_ID>/v2.0}
@@ -30,6 +32,9 @@ x-backend-common: &backend-common
     RABBITMQ_ADDRESSES: rabbitmq-1:5672,rabbitmq-2:5672,rabbitmq-3:5672
     RABBITMQ_USER: ${RABBITMQ_USER:-cafeteria}
     RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-cafeteria}
+    # Secreto compartido para llamadas servicio-a-servicio (ver ms-pedidos
+    # InternalTokenFilter y los PedidoClient). Cambialo en tu .env al desplegar.
+    INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-cafeteria-interno-local}
 
 services:
   mysql:
@@ -56,6 +61,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Crea (si faltan) las 9 bases de datos, una por microservicio, y le da
+  # permisos al usuario de la aplicacion. Corre en CADA "up" y es idempotente:
+  # a diferencia de init-db/ (que MySQL solo ejecuta la primera vez, con el
+  # directorio de datos vacio), esto tambien arregla una carpeta mysql-data
+  # o un volumen EBS que ya existian de antes. Sin esto, todos los
+  # microservicios terminaban escribiendo en la misma base "cafeteria" y
+  # compartiendo la tabla eventos_procesados: el primero que consumia un
+  # evento lo marcaba como procesado y los demas lo descartaban (por eso no
+  # aparecian alertas, boletas ni reportes).
+  mysql-init:
+    image: mysql:8.4
+    container_name: cafeteria-mysql-init
+    restart: "no"
+    environment:
+      MYSQL_PWD: ${DB_PASSWORD:-cafeteria}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        for db in productos inventario pedidos clientes pagos empleados proveedores reportes notificaciones; do
+          mysql -h mysql -uroot -e "CREATE DATABASE IF NOT EXISTS $$db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON $$db.* TO 'cafeteria'@'%';"
+        done
+        echo "Bases de datos por microservicio listas."
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   # Cluster RabbitMQ de 3 nodos (ver docs/EP2_PLAN.md seccion 3 / Fase 2).
   # Peer discovery classic_config via ./rabbitmq/rabbitmq.conf (montado en
@@ -151,8 +183,8 @@ services:
     volumes:
       - ms_productos_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -177,8 +209,8 @@ services:
     volumes:
       - ms_inventario_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -206,8 +238,8 @@ services:
     volumes:
       - ms_pedidos_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -232,8 +264,8 @@ services:
     volumes:
       - ms_clientes_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -255,8 +287,8 @@ services:
     volumes:
       - ms_pagos_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -278,8 +310,8 @@ services:
     volumes:
       - ms_empleados_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -301,8 +333,8 @@ services:
     volumes:
       - ms_proveedores_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -324,8 +356,8 @@ services:
     volumes:
       - ms_reportes_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -350,8 +382,8 @@ services:
     volumes:
       - ms_notificaciones_data:/app/data
     depends_on:
-      mysql:
-        condition: service_healthy
+      mysql-init:
+        condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
     healthcheck:
@@ -456,6 +488,7 @@ services:
         VITE_AZURE_AUTHORITY: ${VITE_AZURE_AUTHORITY:-}
         VITE_AZURE_REDIRECT_URI: ${VITE_AZURE_REDIRECT_URI:-http://localhost:4200}
         VITE_API_SCOPES: ${VITE_API_SCOPES:-api://cafeteria-backend/pedidos.read,api://cafeteria-backend/pedidos.write}
+        VITE_RABBITMQ_DASHBOARD_URL: ${VITE_RABBITMQ_DASHBOARD_URL:-http://localhost:15672}
     container_name: cafeteria-frontend
     restart: unless-stopped
     # nginx escucha 80/443 dentro del contenedor (ver Dockerfile); en local

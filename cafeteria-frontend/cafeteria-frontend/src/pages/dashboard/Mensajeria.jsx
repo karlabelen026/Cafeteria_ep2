@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../../hooks/usePolling';
+import { rabbitDashboardUrl } from '../../utils/rabbitmq';
 import { useApiClient } from '../../services/apiClient';
 import { useToasts } from '../../context/ToastContext.jsx';
 import Modal from '../../components/Modal.jsx';
@@ -51,8 +53,9 @@ export default function Mensajeria() {
   const [aEliminar, setAEliminar] = useState(null); // { tipo, nombre } o { tipo:'binding', binding }
   const [eliminando, setEliminando] = useState(false);
 
+  // Se refresca solo: los contadores de mensajes y consumidores de cada cola
+  // se mueven mientras el sistema trabaja.
   function cargar() {
-    setCargando(true);
     Promise.all([callApi('/rabbitmq/queues'), callApi('/rabbitmq/exchanges'), callApi('/rabbitmq/bindings')])
       .then(([q, e, b]) => {
         setColas(q || []);
@@ -67,7 +70,7 @@ export default function Mensajeria() {
       .finally(() => setCargando(false));
   }
 
-  useEffect(cargar, []); // eslint-disable-line react-hooks/exhaustive-deps
+  usePolling(cargar);
 
   async function crearCola() {
     setGuardando(true);
@@ -157,8 +160,15 @@ export default function Mensajeria() {
     );
   }
 
-  if (error) {
-    return <div className="alert alert-error">{error}</div>;
+  if (error && colas.length === 0 && exchanges.length === 0) {
+    return (
+      <div>
+        <div className="alert alert-error">{error}</div>
+        <button className="dash-btn" onClick={cargar}>
+          Reintentar
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -166,9 +176,14 @@ export default function Mensajeria() {
       <div className="dash-page__header">
         <div>
           <h2>Mensajería</h2>
-          <p>Colas, exchanges y bindings de RabbitMQ (ms-rabbitmq-admin).</p>
+          <p>Crear y eliminar colas, exchanges y bindings de RabbitMQ (ms-rabbitmq-admin).</p>
         </div>
+        <a className="dash-btn" href={rabbitDashboardUrl} target="_blank" rel="noopener noreferrer">
+          Abrir dashboard de RabbitMQ ↗
+        </a>
       </div>
+
+      {error && <div className="alert alert-error">{error}</div>}
 
       <div className="dash-card" style={{ marginBottom: 16 }}>
         <div className="dash-card__header">

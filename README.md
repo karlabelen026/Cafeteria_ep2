@@ -139,14 +139,9 @@ docker compose down            # apagar todo (los datos quedan en volúmenes)
 docker compose down -v         # apagar y borrar también los datos
 ```
 
-**El menú viene vacío en una base nueva.** Para cargar productos de prueba,
-con el stack arriba:
-```bash
-curl -X POST http://localhost:8080/api/productos \
-  -H "Content-Type: application/json" \
-  -d '{"nombre":"Latte Vainilla","descripcion":"Espresso con leche vaporizada y jarabe de vainilla","precio":3200,"categoria":"Bebidas calientes"}'
-```
-(repite con los productos que quieras — en modo `noauth` no hace falta token).
+**El menú ya viene cargado.** La primera vez que `ms-productos` arranca contra una base vacía
+carga la carta inicial (25 productos, cada uno con su foto de `public/productos/`), y
+`ms-inventario` carga los insumos y recetas base. Si ya hay datos, no toca nada.
 
 Si ves el error "ports are not available" al levantar el stack, es porque ya
 tienes el backend/frontend corriendo manualmente (sección 3) en esos mismos
@@ -827,3 +822,64 @@ docker compose up -d mysql
 docker compose up --build -d
 mysql -h 127.0.0.1 -P 3306 -u cafeteria -pcafeteria -e "SHOW DATABASES;"
 ```
+
+---
+
+## 16. EP2 — Ajustes finales: datos compartidos entre roles, recetas y RabbitMQ
+
+### Qué estaba fallando y cómo quedó
+
+| Síntoma | Causa | Arreglo |
+|---|---|---|
+| No aparecían alertas, boletas ni reportes; el stock no bajaba | Con MySQL, los 9 microservicios escribían en la **misma** base `cafeteria` (`hibernate.default_schema` no tiene efecto en MySQL) y compartían la tabla `eventos_procesados`: el primero que consumía un evento lo marcaba como procesado y el resto lo descartaba | Cada microservicio usa **su propia base** (se elige en la URL JDBC). El servicio `mysql-init` de `docker-compose.yml` las crea y da permisos en cada `up` (sirve también para un `mysql-data` que ya existía) |
+| Con Azure activo, `pago.aprobado` caía a la DLQ en inventario, clientes y notificaciones | Sus consumidores le pedían el pedido a `ms-pedidos` sin JWT (401) | Endpoint interno `GET /internal/pedidos/{id}` (no enrutado por el BFF) protegido por el secreto compartido `X-Internal-Token` (`INTERNAL_API_TOKEN`) |
+| Recetas no mostraba nada | El BFF no enrutaba `/api/recetas/**` y la página era un marcador | Ruta agregada al gateway + CRUD real de recetas (producto → insumo + cantidad) |
+| Tienda sin productos ni fotos | El catálogo solo se cargaba con el perfil `seed`; 5 fotos tenían nombres que no calzaban | Carta inicial automática con base vacía; fotos renombradas; la tienda usa `imagenUrl` |
+| Lo que hacía un rol no lo veían los demás | Cada página pedía los datos una sola vez | Todas las vistas se refrescan solas cada 8 s (`hooks/usePolling.js`) |
+| Inventario no dejaba guardar stock 0 | El formulario convertía `0` en vacío | Corregido en `CrudForm` |
+
+### Pedidos: estados visibles
+El backend conserva su máquina de estados (el pago se confirma por mensajería), pero el equipo y el
+cliente ven solo el flujo de preparación: **Pendiente → En preparación → Listo → Entregado**
+(`utils/estadosPedido.js`). Los pedidos cuyo pago aún no se confirma o fue rechazado no se listan en
+"Pedidos": eso se revisa en "Pagos".
+
+### RabbitMQ: credenciales, dashboard y cluster por etapas
+- Usuario y clave del broker se definen en `docker-compose.yml` (`RABBITMQ_DEFAULT_USER` /
+  `RABBITMQ_DEFAULT_PASS`, tomados de `RABBITMQ_USER` / `RABBITMQ_PASSWORD` del `.env`; por defecto
+  `cafeteria` / `cafeteria`).
+- El rol **ADMIN** tiene el botón **"Dashboard RabbitMQ"** (barra lateral, Resumen y Mensajería) que
+  abre el panel propio de RabbitMQ (`VITE_RABBITMQ_DASHBOARD_URL`, por defecto `http://localhost:15672`)
+  para ver colas, exchanges, conexiones y mensajes en vivo. El Resumen ya no replica esa tabla.
+- "Mensajería" (solo ADMIN) sigue siendo el front de `ms-rabbitmq-admin`: crear y eliminar colas,
+  exchanges y bindings.
+- Para demostrar primero **un nodo** y después **el cluster**:
+
+```bash
+./scripts/rabbitmq-cluster.sh un-nodo    # MySQL + rabbitmq-1 + toda la aplicación
+# ... probar un pedido, ver http://localhost:15672 ...
+./scripts/rabbitmq-cluster.sh agregar    # suma rabbitmq-2 y rabbitmq-3 y replica las colas quorum
+./scripts/rabbitmq-cluster.sh estado     # nodos activos y miembros de cada cola
+```
+
+`docker compose up -d --build` sigue levantando todo junto (los 3 nodos de una vez).
+
+### Cómo probarlo
+```bash
+docker compose up -d --build
+# Tienda: http://localhost:4200  (25 productos con foto)
+curl -X POST http://localhost:8080/api/public/checkout -H "Content-Type: application/json" \
+  -d '{"cliente":{"nombre":"Ana","email":"ana@correo.cl"},"items":[{"productoId":1,"cantidad":1}],"pago":{"metodo":"DEBITO","numeroTarjeta":"4111111111111111"}}'
+# -> con el codigoSeguimiento: GET /api/public/pedidos/{codigo} (PAGADO) y /api/public/tickets/{codigo} (boleta)
+# Tarjeta terminada en 8888 -> DLQ directa; 9999 -> 3 reintentos y DLQ; 0000 -> pago rechazado
+./mvnw -q clean verify        # en cafeteria-backend/cafeteria-backend
+npm run build                 # en cafeteria-frontend/cafeteria-frontend
+```
+
+Si recreas un solo microservicio (`docker compose up -d --build ms-pedidos`), reinicia también el BFF
+(`docker compose restart bff-gateway`): el gateway guarda la IP anterior del contenedor.
+
+### Qué queda pendiente
+- La pauta pide el frontend en **Angular**; este proyecto es React + Vite (decisión heredada de la EP1).
+- La base antigua `cafeteria` de MySQL queda sin uso (no se borra): si tenías datos ahí, hay que
+  volver a ingresarlos desde el dashboard.

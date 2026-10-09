@@ -138,6 +138,25 @@
   font-size: 0.85rem;
 }
 
+.dash__mensajeria-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.dash__mensajeria-card--externo {
+  margin-top: 8px;
+  border: 1px dashed var(--dash-cafe, #a8744a);
+}
+
+a.dash-btn,
+a.dash-btn:hover {
+  display: inline-block;
+  text-decoration: none;
+  color: #fff;
+  white-space: nowrap;
+}
+
 .dash__mensajeria-card strong {
   display: block;
   margin-bottom: 4px;

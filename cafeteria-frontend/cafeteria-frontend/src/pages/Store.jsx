@@ -121,7 +121,11 @@ export default function Store() {
       {productoNuevo && (
         <section className="new-product-banner">
           <div className="new-product-banner__photo">
-            <ProductVisual nombre={productoNuevo.nombre} categoria={productoNuevo.categoria} />
+            <ProductVisual
+              nombre={productoNuevo.nombre}
+              categoria={productoNuevo.categoria}
+              imagenUrl={productoNuevo.imagenUrl}
+            />
           </div>
           <div className="new-product-banner__body">
             <span className="ribbon ribbon--nuevo" style={{ position: 'static' }}>
@@ -175,7 +179,7 @@ export default function Store() {
             return (
               <article key={p.id} className="store-card">
                 <div className="store-card__visual-wrap">
-                  <ProductVisual nombre={p.nombre} categoria={p.categoria} />
+                  <ProductVisual nombre={p.nombre} categoria={p.categoria} imagenUrl={p.imagenUrl} />
                   {tag && <span className={`ribbon ribbon--${tag.toLowerCase()}`}>{tag}</span>}
                 </div>
                 <div className="store-card__body">

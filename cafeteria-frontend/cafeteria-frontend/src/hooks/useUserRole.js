@@ -21,9 +21,9 @@ function elegirRolPorDefecto(roles) {
 // del claim "roles" del token — el frontend NUNCA decodifica el JWT por su
 // cuenta (ver docs/EP2_PLAN.md seccion 4).
 //
-// En modo noauth/demo (VITE_AUTH_DISABLED=true) no hay backend de verdad
-// detras del login, asi que se simula con el selector "Ver como" guardado en
-// localStorage (ver banner "MODO DEMO" en layouts/DashboardLayout).
+// En el perfil local sin Azure (VITE_AUTH_DISABLED=true, backend en noauth)
+// no hay token del que leer roles, asi que el perfil se elige a mano con el
+// selector "Perfil" de la barra superior y se recuerda en localStorage.
 //
 // Si el usuario tiene mas de un rol asignado en Azure, puede elegir cual usar
 // como "perfil activo"; esa eleccion se recuerda en localStorage mientras
@@ -35,7 +35,7 @@ export function useAuthProfile() {
     authDisabled ? localStorage.getItem(DEMO_ROLE_KEY) || 'ADMIN' : localStorage.getItem(ACTIVE_ROLE_KEY)
   );
   const [perfil, setPerfil] = useState(() =>
-    authDisabled ? { nombre: 'Equipo Demo', email: 'demo@cafegestion360.cl' } : { nombre: '', email: '' }
+    authDisabled ? { nombre: 'Equipo', email: '' } : { nombre: '', email: '' }
   );
 
   useEffect(() => {

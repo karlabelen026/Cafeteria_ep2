@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../../../hooks/usePolling';
 import { useApiClient } from '../../../services/apiClient';
 import { useToasts } from '../../../context/ToastContext.jsx';
 import Modal from '../../../components/Modal.jsx';
@@ -35,7 +36,7 @@ export default function InsumosCriticos() {
       .finally(() => setCargando(false));
   }
 
-  useEffect(cargar, []); // eslint-disable-line react-hooks/exhaustive-deps
+  usePolling(cargar);
 
   function abrirModal(insumo) {
     setModal(insumo);

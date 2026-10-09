@@ -5,20 +5,17 @@ import cl.duoc.cafeteria.inventario.model.RecetaItem;
 import cl.duoc.cafeteria.inventario.repository.InsumoRepository;
 import cl.duoc.cafeteria.inventario.repository.RecetaItemRepository;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 /**
- * Carga insumos y recetas de demostracion para que el dashboard de
- * inventario (y la alerta de stock bajo) no partan vacios. Se activa SOLO
- * con el perfil "seed" (ver docs/EP2_PLAN.md seccion 5), combinable con
- * otros perfiles, p.ej. SPRING_PROFILES_ACTIVE=noauth,seed. No hace nada si
- * ya existen insumos (para no duplicar en cada reinicio).
+ * Carga los insumos y recetas iniciales la primera vez que el microservicio
+ * arranca contra una base vacia. Sin recetas, un pago aprobado no descuenta
+ * stock y nunca se genera la alerta de stock bajo. No hace nada si ya
+ * existen insumos (nunca pisa lo que se haya editado desde el dashboard).
  */
 @Component
-@Profile("seed")
 public class SeedDataLoader implements CommandLineRunner {
 
     private final InsumoRepository insumoRepository;
@@ -43,8 +40,8 @@ public class SeedDataLoader implements CommandLineRunner {
         Insumo servilletas = insumoRepository.save(insumo("Servilletas", "unidad", 600.0, 200.0));
         insumoRepository.save(insumo("Harina", "g", 5000.0, 2000.0));
 
-        // Recetas de ejemplo: productoId asume los ids 1..5 del seed de
-        // ms-productos (otra base de datos, no verificable desde aqui).
+        // productoId = ids 1..5 de la carta inicial de ms-productos (Latte
+        // Vainilla, Mocaccino, Cold Brew, Frappé de Caramelo, Banana Bread).
         recetaItemRepository.saveAll(List.of(
                 receta(1L, cafeEnGrano.getId(), 18.0),
                 receta(1L, leche.getId(), 150.0),

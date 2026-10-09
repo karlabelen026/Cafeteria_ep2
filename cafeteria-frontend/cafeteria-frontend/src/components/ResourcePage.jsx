@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { useApiClient } from '../services/apiClient';
 
 // Vista genérica de "listar recurso": la usan Clientes, Inventario,
@@ -20,16 +21,22 @@ export default function ResourcePage({
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    callApi(endpoint)
-      .then(setItems)
-      .catch((err) => {
-        console.error(err);
-        setError(`No se pudo cargar la información (revisa el token o el backend).`);
-      })
-      .finally(() => setCargando(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpoint]);
+  usePolling(
+    () => {
+      callApi(endpoint)
+        .then((data) => {
+          setItems(data || []);
+          setError('');
+        })
+        .catch((err) => {
+          console.error(err);
+          setError(`No se pudo cargar la información (revisa el token o el backend).`);
+        })
+        .finally(() => setCargando(false));
+    },
+    undefined,
+    [endpoint],
+  );
 
   return (
     <div>

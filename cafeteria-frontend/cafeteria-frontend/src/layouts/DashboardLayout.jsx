@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { useAuthProfile } from '../hooks/useUserRole';
 import { useApiClient } from '../services/apiClient';
+import { usePolling } from '../hooks/usePolling';
+import { rabbitDashboardUrl } from '../utils/rabbitmq';
 import '../styles/dashboard.css';
 
 const authDisabled = import.meta.env.VITE_AUTH_DISABLED === 'true';
-const ROLES_DEMO = ['ADMIN', 'GERENTE', 'BARISTA', 'CAJERO', 'BODEGUERO'];
+// Solo para el perfil local sin Azure (noauth): ahi el backend no entrega
+// roles, asi que el perfil se elige a mano. Con Azure el rol viene del token.
+const ROLES_LOCALES = ['ADMIN', 'GERENTE', 'BARISTA', 'CAJERO', 'BODEGUERO'];
 
 // Grupos "Menu" y "Otros" de la sidebar (ver docs/EP2_PLAN.md seccion 6.2).
 // roles=null significa "todos los roles lo ven"; si no, solo los listados
@@ -61,25 +65,15 @@ export default function DashboardLayout() {
   const [desde, setDesde] = useState(hace7Dias());
   const [hasta, setHasta] = useState(hoy());
 
-  useEffect(() => {
-    let cancelado = false;
-    function cargarAlertas() {
-      callApi('/notificaciones/alertas')
-        .then((alertas) => {
-          if (!cancelado) setAlertasNoLeidas((alertas || []).filter((a) => !a.leida).length);
-        })
-        .catch(() => {
-          /* la campana solo es informativa: si falla, se deja en 0 sin romper la pagina */
-        });
-    }
-    cargarAlertas();
-    const intervalo = setInterval(cargarAlertas, 30000);
-    return () => {
-      cancelado = true;
-      clearInterval(intervalo);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // La campana se refresca sola: una alerta generada por un evento (stock
+  // bajo, pedido listo, mensaje en DLQ) aparece para todos los roles.
+  usePolling(() => {
+    callApi('/notificaciones/alertas')
+      .then((alertas) => setAlertasNoLeidas((alertas || []).filter((a) => !a.leida).length))
+      .catch(() => {
+        /* la campana solo es informativa: si falla, no se rompe la pagina */
+      });
+  });
 
   const iniciales = (nombre || 'Equipo')
     .split(' ')
@@ -90,7 +84,6 @@ export default function DashboardLayout() {
 
   return (
     <div className="dash">
-      {authDisabled && <div className="demo-banner">MODO DEMO — el rol se simula, no viene de Azure</div>}
       <div className="dash__body">
       {sidebarAbierta && <div className="dash__scrim" onClick={() => setSidebarAbierta(false)} />}
 
@@ -124,10 +117,21 @@ export default function DashboardLayout() {
 
         <div className="dash__sidebar-footer">
           {role === 'ADMIN' && (
-            <NavLink to="/dashboard/mensajeria" className="dash__mensajeria-card">
-              <strong>🐇 Mensajería</strong>
-              Colas, exchanges y DLQ de RabbitMQ
-            </NavLink>
+            <>
+              <NavLink to="/dashboard/mensajeria" className="dash__mensajeria-card">
+                <strong>🐇 Mensajería</strong>
+                Administrar colas, exchanges y bindings
+              </NavLink>
+              <a
+                href={rabbitDashboardUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="dash__mensajeria-card dash__mensajeria-card--externo"
+              >
+                <strong>📡 Dashboard RabbitMQ ↗</strong>
+                Actividad en vivo del cluster
+              </a>
+            </>
           )}
         </div>
       </aside>
@@ -155,11 +159,11 @@ export default function DashboardLayout() {
               className="dash-select"
               value={role || ''}
               onChange={(e) => setActiveRole(e.target.value)}
-              title="Simulador de rol (solo modo noauth, sin Azure real)"
+              title="Perfil local (solo sin Azure)"
             >
-              {ROLES_DEMO.map((r) => (
+              {ROLES_LOCALES.map((r) => (
                 <option key={r} value={r}>
-                  Ver como: {r}
+                  Perfil: {r}
                 </option>
               ))}
             </select>

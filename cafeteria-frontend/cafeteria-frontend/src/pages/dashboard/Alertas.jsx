@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../../hooks/usePolling';
 import { useApiClient } from '../../services/apiClient';
 
 const ETIQUETA = {
@@ -17,7 +18,10 @@ export default function Alertas() {
 
   const cargar = () => {
     callApi('/notificaciones/alertas')
-      .then(setAlertas)
+      .then((data) => {
+        setAlertas(data || []);
+        setError('');
+      })
       .catch((err) => {
         console.error(err);
         setError('No se pudieron cargar las alertas (revisa el token o el backend).');
@@ -25,7 +29,7 @@ export default function Alertas() {
       .finally(() => setCargando(false));
   };
 
-  useEffect(cargar, []);
+  usePolling(cargar);
 
   const marcarLeida = async (alerta) => {
     try {

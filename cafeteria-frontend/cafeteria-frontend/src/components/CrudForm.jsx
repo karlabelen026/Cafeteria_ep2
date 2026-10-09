@@ -69,9 +69,16 @@ export default function CrudForm({ fields, values, onChange, errors, onSubmit, o
                 min={field.min}
                 required={field.required}
                 placeholder={field.placeholder}
-                onChange={(e) =>
-                  setCampo(field.name, field.type === 'number' ? e.target.valueAsNumber || '' : e.target.value)
-                }
+                max={field.max}
+                onChange={(e) => {
+                  if (field.type !== 'number') {
+                    setCampo(field.name, e.target.value);
+                    return;
+                  }
+                  // 0 es un valor valido (p.ej. stock en 0): solo el campo vacio queda como ''.
+                  const numero = e.target.valueAsNumber;
+                  setCampo(field.name, Number.isNaN(numero) ? '' : numero);
+                }}
               />
             )}
 

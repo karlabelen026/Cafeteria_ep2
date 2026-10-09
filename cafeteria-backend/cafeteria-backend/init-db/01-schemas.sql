@@ -12,3 +12,16 @@ CREATE SCHEMA IF NOT EXISTS empleados;
 CREATE SCHEMA IF NOT EXISTS proveedores;
 CREATE SCHEMA IF NOT EXISTS reportes;
 CREATE SCHEMA IF NOT EXISTS notificaciones;
+
+-- El usuario de la aplicacion (MYSQL_USER) solo recibe permisos sobre MYSQL_DATABASE:
+-- hay que darselos explicitamente sobre cada base. docker-compose.yml repite esto
+-- mismo en el servicio mysql-init para instalaciones que ya tenian datos.
+GRANT ALL PRIVILEGES ON productos.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON inventario.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON pedidos.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON clientes.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON pagos.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON empleados.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON proveedores.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON reportes.* TO 'cafeteria'@'%';
+GRANT ALL PRIVILEGES ON notificaciones.* TO 'cafeteria'@'%';

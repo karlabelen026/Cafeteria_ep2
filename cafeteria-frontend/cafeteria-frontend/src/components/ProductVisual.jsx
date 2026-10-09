@@ -61,16 +61,21 @@ function slugify(nombre) {
 export default function ProductVisual({ nombre, categoria, imagenUrl }) {
   const [c1, c2] = PALETTES[categoria] || PALETTES.default;
   const Icon = pickIcon(categoria);
-  const [imgError, setImgError] = useState(false);
+  const [intento, setIntento] = useState(0);
 
-  // Foto real si existe: pon un archivo en public/productos/<nombre-slug>.jpg
-  // (o pasa imagenUrl directamente). Si no carga, cae al icono de siempre.
-  const src = imagenUrl || (nombre ? `/productos/${slugify(nombre)}.jpg` : null);
+  // Foto real del producto, probando en orden: la imagenUrl guardada en el
+  // producto, y luego public/productos/<nombre-slug>.jpg / .png. Si ninguna
+  // carga, cae al icono de siempre.
+  const slug = nombre ? slugify(nombre) : null;
+  const candidatas = [imagenUrl, slug && `/productos/${slug}.jpg`, slug && `/productos/${slug}.png`].filter(
+    (url, i, lista) => url && lista.indexOf(url) === i,
+  );
+  const src = candidatas[intento];
 
-  if (src && !imgError) {
+  if (src) {
     return (
       <div className="product-visual product-visual--photo">
-        <img src={src} alt="" onError={() => setImgError(true)} />
+        <img src={src} alt={nombre || ''} loading="lazy" onError={() => setIntento((n) => n + 1)} />
       </div>
     );
   }

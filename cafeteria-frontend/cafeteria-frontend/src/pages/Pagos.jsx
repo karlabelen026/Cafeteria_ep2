@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { useApiClient } from '../services/apiClient';
 import { useToasts } from '../context/ToastContext.jsx';
 import { useUserRole } from '../hooks/useUserRole';
@@ -19,16 +20,18 @@ export default function Pagos() {
   const [error, setError] = useState('');
   const [anulando, setAnulando] = useState(null);
 
-  useEffect(() => {
+  usePolling(() => {
     callApi('/pagos')
-      .then(setPagos)
+      .then((data) => {
+        setPagos(data || []);
+        setError('');
+      })
       .catch((err) => {
         console.error(err);
         setError('No se pudieron cargar los pagos (revisa el token o el backend).');
       })
       .finally(() => setCargando(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  });
 
   const anular = async (pago) => {
     setAnulando(pago.id);

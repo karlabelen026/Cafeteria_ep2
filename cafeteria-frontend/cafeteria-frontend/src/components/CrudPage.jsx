@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { usePolling } from '../hooks/usePolling';
 import { useApiClient } from '../services/apiClient';
 import { useToasts } from '../context/ToastContext.jsx';
 import Modal from './Modal.jsx';
@@ -47,8 +48,9 @@ export default function CrudPage({
   const [aEliminar, setAEliminar] = useState(null);
   const [eliminando, setEliminando] = useState(false);
 
+  // Se vuelve a pedir la lista cada pocos segundos (sin spinner): lo que
+  // otro rol agrega, edita o elimina aparece aqui sin recargar la pagina.
   function cargar() {
-    setCargando(true);
     callApi(endpoint)
       .then((data) => {
         setItems(data || []);
@@ -61,7 +63,7 @@ export default function CrudPage({
       .finally(() => setCargando(false));
   }
 
-  useEffect(cargar, [endpoint]); // eslint-disable-line react-hooks/exhaustive-deps
+  usePolling(cargar, undefined, [endpoint]);
 
   const filtrados = useMemo(() => {
     if (!busqueda.trim() || searchKeys.length === 0) return items;
@@ -103,10 +105,12 @@ export default function CrudPage({
         });
         setItems((prev) => prev.map((i) => (i[idField] === modal[idField] ? actualizado : i)));
         toasts.success(`${nombreSingular} actualizado.`);
+        cargar();
       } else {
         const creado = await callApi(endpoint, { method: 'POST', body: JSON.stringify(cuerpo) });
         setItems((prev) => [...prev, creado]);
         toasts.success(`${nombreSingular} creado.`);
+        cargar();
       }
       cerrarModal();
     } catch (err) {

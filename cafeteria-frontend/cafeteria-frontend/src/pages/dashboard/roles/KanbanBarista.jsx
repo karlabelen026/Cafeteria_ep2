@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '../../../hooks/usePolling';
 import { useApiClient } from '../../../services/apiClient';
 import { useToasts } from '../../../context/ToastContext.jsx';
+import { etiquetaEstado } from '../../../utils/estadosPedido';
 
 // Kanban "Cola de preparación" (ver docs/EP2_PLAN.md seccion 6.2):
 // PAGADO -> EN_PREPARACION -> LISTO -> ENTREGADO, con un boton para avanzar
 // cada pedido a la siguiente columna. BARISTA no puede cancelar (eso es
 // exclusivo de ADMIN, ver PedidoController).
 const COLUMNAS = [
-  { estado: 'PAGADO', titulo: 'Pagado', siguiente: 'EN_PREPARACION' },
+  { estado: 'PAGADO', titulo: 'Pendiente', siguiente: 'EN_PREPARACION' },
   { estado: 'EN_PREPARACION', titulo: 'En preparación', siguiente: 'LISTO' },
   { estado: 'LISTO', titulo: 'Listo', siguiente: 'ENTREGADO' },
   { estado: 'ENTREGADO', titulo: 'Entregado', siguiente: null },
@@ -34,12 +36,7 @@ export default function KanbanBarista() {
       .finally(() => setCargando(false));
   }
 
-  useEffect(() => {
-    cargar();
-    const intervalo = setInterval(cargar, 10000);
-    return () => clearInterval(intervalo);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  usePolling(cargar);
 
   async function avanzar(pedido, siguiente) {
     setAvanzando(pedido.id);
@@ -49,7 +46,7 @@ export default function KanbanBarista() {
         body: JSON.stringify({ nuevoEstado: siguiente }),
       });
       setPedidos((prev) => prev.map((p) => (p.id === pedido.id ? actualizado : p)));
-      toasts.success(`Pedido ${pedido.codigoSeguimiento?.slice(0, 8)} → ${siguiente}.`);
+      toasts.success(`Pedido ${pedido.codigoSeguimiento?.slice(0, 8)} → ${etiquetaEstado(siguiente)}.`);
     } catch (err) {
       console.error(err);
       toasts.error(err.message || 'No se pudo actualizar el pedido.');
@@ -78,7 +75,7 @@ export default function KanbanBarista() {
       <div className="dash-page__header">
         <div>
           <h2>Cola de preparación</h2>
-          <p>Pedidos pagados, en curso y entregados. Se actualiza solo cada 10 segundos.</p>
+          <p>Pedidos pendientes, en curso y entregados. Se actualiza solo.</p>
         </div>
       </div>
 
@@ -116,7 +113,7 @@ export default function KanbanBarista() {
                           disabled={avanzando === p.id}
                           onClick={() => avanzar(p, col.siguiente)}
                         >
-                          {avanzando === p.id ? 'Actualizando...' : `Avanzar a ${col.siguiente}`}
+                          {avanzando === p.id ? 'Actualizando...' : `Pasar a ${etiquetaEstado(col.siguiente)}`}
                         </button>
                       )}
                     </li>

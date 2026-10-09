@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useState } from 'react';
+import { NavLink, useOutletContext } from 'react-router-dom';
 import {
   ResponsiveContainer,
   BarChart,
@@ -16,6 +16,8 @@ import {
 } from 'recharts';
 import { useApiClient } from '../../services/apiClient';
 import { useAuthProfile } from '../../hooks/useUserRole';
+import { usePolling } from '../../hooks/usePolling';
+import { rabbitDashboardUrl } from '../../utils/rabbitmq';
 import KanbanBarista from './roles/KanbanBarista.jsx';
 import CajaDelDia from './roles/CajaDelDia.jsx';
 import InsumosCriticos from './roles/InsumosCriticos.jsx';
@@ -64,61 +66,41 @@ export default function DashboardHome() {
   const [datos, setDatos] = useState(null);
   const [alertas, setAlertas] = useState([]);
   const [dlqResumen, setDlqResumen] = useState(null);
-  const [colas, setColas] = useState(null);
   const [cluster, setCluster] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
-  const [reprocesando, setReprocesando] = useState(null);
 
   const esVistaKpi = role === 'ADMIN' || role === 'GERENTE';
 
-  useEffect(() => {
-    if (!esVistaKpi) {
-      setCargando(false);
-      return;
-    }
-
-    let cancelado = false;
-    function cargar() {
+  // Se refresca solo: una venta, un pedido o una alerta nuevos (generados por
+  // cualquier rol o por un evento de RabbitMQ) aparecen sin recargar.
+  usePolling(
+    () => {
+      if (!esVistaKpi) {
+        setCargando(false);
+        return;
+      }
       const query = `?desde=${desde}&hasta=${hasta}`;
       const pedidos = [
-        callApi(`/reportes/dashboard${query}`).then((d) => !cancelado && setDatos(d)),
-        callApi('/notificaciones/alertas').then((a) => !cancelado && setAlertas(a || [])),
+        callApi(`/reportes/dashboard${query}`).then(setDatos),
+        callApi('/notificaciones/alertas').then((a) => setAlertas(a || [])),
       ];
       if (role === 'ADMIN') {
-        pedidos.push(callApi('/rabbitmq/dlq').then((d) => !cancelado && setDlqResumen(d || [])));
-        pedidos.push(callApi('/rabbitmq/queues').then((q) => !cancelado && setColas(q || [])));
-        pedidos.push(callApi('/rabbitmq/cluster').then((c) => !cancelado && setCluster(c)));
+        // El estado de RabbitMQ es informativo: si falla no debe tapar los KPI.
+        callApi('/rabbitmq/dlq').then((d) => setDlqResumen(d || [])).catch(() => setDlqResumen([]));
+        callApi('/rabbitmq/cluster').then(setCluster).catch(() => setCluster(null));
       }
       Promise.all(pedidos)
+        .then(() => setError(''))
         .catch((err) => {
           console.error(err);
-          if (!cancelado) setError('No se pudo cargar el dashboard (revisa el token o el backend).');
+          setError('No se pudo cargar el dashboard (revisa el token o el backend).');
         })
-        .finally(() => !cancelado && setCargando(false));
-    }
-
-    cargar();
-    const intervalo = setInterval(cargar, 30000);
-    return () => {
-      cancelado = true;
-      clearInterval(intervalo);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desde, hasta, role]);
-
-  async function reprocesarDlq(nombreCola) {
-    setReprocesando(nombreCola);
-    try {
-      await callApi(`/rabbitmq/dlq/${encodeURIComponent(nombreCola)}/reprocess?max=10`, { method: 'POST' });
-      const nuevoResumen = await callApi('/rabbitmq/dlq');
-      setDlqResumen(nuevoResumen || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setReprocesando(null);
-    }
-  }
+        .finally(() => setCargando(false));
+    },
+    undefined,
+    [desde, hasta, role],
+  );
 
   if (!esVistaKpi) {
     return (
@@ -140,6 +122,7 @@ export default function DashboardHome() {
   }
 
   const totalDlq = (dlqResumen || []).reduce((acc, d) => acc + d.mensajes, 0);
+  const nodosActivos = cluster?.nodos?.filter((n) => n.running).length;
   const ventasChart = (datos?.ventasUltimos7Dias || []).map((v, i) => ({
     fecha: nombreDia(v.fecha),
     actual: v.totalVentas,
@@ -296,52 +279,22 @@ export default function DashboardHome() {
       {role === 'ADMIN' && (
         <div className="dash-card">
           <div className="dash-card__header">
-            <h3>Estado de mensajería</h3>
-            <span className="dash-card__sub">
-              Cluster: {cluster?.nodos?.filter((n) => n.running).length ?? '—'}/{cluster?.nodos?.length ?? '—'} nodos activos
-            </span>
-          </div>
-          {colas ? (
-            <div className="dash-table-wrap">
-              <table className="dash-table">
-                <thead>
-                  <tr>
-                    <th>Cola</th>
-                    <th>Listos</th>
-                    <th>No confirmados</th>
-                    <th>Consumidores</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {colas.map((c) => {
-                    const esDlq = c.name.endsWith('.dlq');
-                    return (
-                      <tr key={c.name} style={esDlq && c.messagesReady > 0 ? { color: '#c0392b' } : undefined}>
-                        <td>{c.name}</td>
-                        <td>{c.messagesReady}</td>
-                        <td>{c.messagesUnacknowledged}</td>
-                        <td>{c.consumers}</td>
-                        <td>
-                          {esDlq && c.messagesReady > 0 && (
-                            <button
-                              className="dash-icon-btn"
-                              disabled={reprocesando === c.name}
-                              onClick={() => reprocesarDlq(c.name)}
-                            >
-                              {reprocesando === c.name ? 'Reprocesando…' : 'Reprocesar'}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div>
+              <h3>Mensajería (RabbitMQ)</h3>
+              <span className="dash-card__sub">
+                Cluster: {nodosActivos ?? '—'}/{cluster?.nodos?.length ?? '—'} nodos activos · {totalDlq} mensajes en
+                DLQ
+              </span>
             </div>
-          ) : (
-            <Skeleton height={160} />
-          )}
+            <a className="dash-btn" href={rabbitDashboardUrl} target="_blank" rel="noopener noreferrer">
+              Abrir dashboard de RabbitMQ ↗
+            </a>
+          </div>
+          <p className="dash-empty">
+            La actividad de colas, exchanges, conexiones y consumidores se ve en el dashboard propio de RabbitMQ
+            (usuario y clave del broker). Para crear o eliminar colas, exchanges y bindings usa{' '}
+            <NavLink to="/dashboard/mensajeria">Mensajería</NavLink>.
+          </p>
         </div>
       )}
     </div>

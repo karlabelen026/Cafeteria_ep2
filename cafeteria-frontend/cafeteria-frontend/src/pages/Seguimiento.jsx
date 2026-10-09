@@ -3,9 +3,11 @@ import { useParams, Link } from 'react-router-dom';
 import { useApiClient } from '../services/apiClient';
 import CoffeeIcon from '../components/CoffeeIcon';
 import { badgeClassForEstado } from '../utils/badges';
+import { etiquetaEstado } from '../utils/estadosPedido';
 
 const PASOS = ['PAGADO', 'EN_PREPARACION', 'LISTO', 'ENTREGADO'];
 const ESTADOS_FALLIDOS = ['PAGO_RECHAZADO', 'CANCELADO'];
+const ESTADOS_FINALES = ['ENTREGADO', ...ESTADOS_FALLIDOS];
 
 // Seguimiento publico por codigo (nunca por id secuencial, ver
 // docs/EP2_PLAN.md seccion 2, hallazgo #7). Hace polling cada 3s mientras el
@@ -30,7 +32,9 @@ export default function Seguimiento() {
           if (cancelado) return;
           setPedido(data);
           setError('');
-          if (data.estado !== 'PENDIENTE_PAGO' && intervalo.current) {
+          // Se sigue consultando hasta un estado final: asi el cliente ve
+          // avanzar su pedido cuando el barista lo cambia desde el dashboard.
+          if (ESTADOS_FINALES.includes(data.estado) && intervalo.current) {
             clearInterval(intervalo.current);
             intervalo.current = null;
           }
@@ -56,7 +60,7 @@ export default function Seguimiento() {
   // pago.aprobado: puede tardar un instante en existir, asi que un 404 aqui
   // no es un error real, solo "todavia no esta lista".
   useEffect(() => {
-    if (!pedido || pedido.estado === 'PENDIENTE_PAGO' || pedido.estado !== 'PAGADO' || ticket) return;
+    if (!pedido || ticket || !PASOS.includes(pedido.estado)) return;
     callApi(`/public/tickets/${codigo}`)
       .then(setTicket)
       .catch(() => {
@@ -96,7 +100,7 @@ export default function Seguimiento() {
                     : 'Gracias por tu compra. Así va tu pedido:'}
                 </p>
               </div>
-              <span className={badgeClassForEstado(pedido.estado)}>{pedido.estado}</span>
+              <span className={badgeClassForEstado(pedido.estado)}>{etiquetaEstado(pedido.estado)}</span>
             </div>
 
             {pedido.estado === 'PENDIENTE_PAGO' && (
@@ -122,7 +126,7 @@ export default function Seguimiento() {
                     className={`order-timeline__step${idx <= pasoActual ? ' order-timeline__step--done' : ''}`}
                   >
                     <span className="order-timeline__dot" />
-                    <span>{paso}</span>
+                    <span>{etiquetaEstado(paso)}</span>
                   </div>
                 ))}
               </div>

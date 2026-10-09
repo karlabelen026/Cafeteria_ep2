@@ -59,6 +59,9 @@ public class SecurityConfig {
                 // propio JWT de forma independiente, asi que tambien hay que
                 // marcarlos como publicos aqui o quedarian respondiendo 401.
                 .requestMatchers("/api/public/**").permitAll()
+                // Llamadas servicio-a-servicio: no traen JWT de usuario, las
+                // autentica InternalTokenFilter con el secreto compartido.
+                .requestMatchers("/internal/**").permitAll()
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
