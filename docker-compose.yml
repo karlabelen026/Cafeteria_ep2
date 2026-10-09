@@ -57,10 +57,13 @@ services:
       - ./mysql-data:/var/lib/mysql
       - ./cafeteria-backend/cafeteria-backend/init-db:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "cafeteria", "-p${DB_PASSWORD:-cafeteria}"]
+      # Por TCP (127.0.0.1), no por socket: asi "healthy" significa que el
+      # servidor definitivo ya acepta conexiones de red, no el temporal de
+      # inicializacion del primer arranque.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--protocol=tcp", "-u", "cafeteria", "-p${DB_PASSWORD:-cafeteria}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 30
 
   # Crea (si faltan) las 9 bases de datos, una por microservicio, y le da
   # permisos al usuario de la aplicacion. Corre en CADA "up" y es idempotente:
@@ -81,6 +84,18 @@ services:
     command:
       - |
         set -e
+        # En el primer arranque con el directorio de datos vacio, MySQL corre un
+        # servidor temporal SIN red mientras se inicializa: hay que esperar a
+        # que el definitivo acepte conexiones TCP antes de crear las bases.
+        intentos=0
+        until mysql -h mysql -uroot -e "SELECT 1" >/dev/null 2>&1; do
+          intentos=$$((intentos + 1))
+          if [ "$$intentos" -ge 60 ]; then
+            echo "MySQL no acepto conexiones despues de 5 minutos." >&2
+            exit 1
+          fi
+          sleep 5
+        done
         for db in productos inventario pedidos clientes pagos empleados proveedores reportes notificaciones; do
           mysql -h mysql -uroot -e "CREATE DATABASE IF NOT EXISTS $$db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON $$db.* TO 'cafeteria'@'%';"
         done
