@@ -27,7 +27,10 @@ public class CorsConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOriginPatterns(List.of(frontendOrigin));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        // PATCH incluido: lo usan cambiar el estado de un pedido, marcar una
+        // alerta como leida y anular un pago. Sin el, el navegador bloquea la
+        // peticion en el preflight ("Failed to fetch") aunque el backend funcione.
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         // El JWT viaja en el header Authorization, no en cookies, asi que no
         // hace falta enviar credenciales (cookies) entre origenes.
