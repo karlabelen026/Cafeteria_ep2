@@ -6,6 +6,7 @@ const ETIQUETA = {
   STOCK_BAJO: 'Stock bajo',
   PEDIDO_LISTO: 'Pedido listo',
   DLQ: 'Mensaje en DLQ',
+  FRAUDE: 'Posible fraude',
 };
 
 // Lista de alertas (ver docs/EP2_PLAN.md seccion 5): stock bajo, pedido listo
@@ -46,7 +47,7 @@ export default function Alertas() {
       <div className="dash-page__header">
         <div>
           <h2>Alertas</h2>
-          <p>Stock bajo, pedidos listos y mensajes que terminaron en una DLQ.</p>
+          <p>Stock bajo, pedidos listos, posibles fraudes y mensajes que terminaron en una DLQ.</p>
         </div>
       </div>
 

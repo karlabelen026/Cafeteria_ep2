@@ -33,6 +33,22 @@ spring:
         prefetch: 5
         default-requeue-rejected: false
 
+  # Kafka (Fase 8): consume alertas-fraude (las emite ms-antifraude).
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ErrorHandlingDeserializer envuelve al JsonDeserializer: un JSON
+      # invalido no deja al consumidor en un bucle infinito, el registro se
+      # manda a la DLT (guia 3.3.3).
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.value.default.type: cl.duoc.cafeteria.common.evento.AlertaFraudeEvent
+        spring.json.trusted.packages: cl.duoc.cafeteria.common.evento
+        spring.json.use.type.headers: false
+
 server:
   port: 8089
 
@@ -74,3 +90,25 @@ app:
       message-ttl-ms: 600000
       max-length: 10000
       dlq-ttl-ms: 86400000
+  # Topics y consumer groups de Kafka (Fase 8). Nombres, reintentos y
+  # retencion SOLO aqui (KafkaTopicsProperties + KafkaConsumerConfig).
+  kafka:
+    topics:
+      alertas-fraude: alertas-fraude
+      alertas-fraude-dlt: alertas-fraude.DLT
+    group-ids:
+      # Grupo propio: recibe TODAS las alertas aunque ms-antifraude tambien
+      # las lea con el suyo (antifraude-monitor).
+      notificaciones: notificaciones-antifraude
+      # Usado solo por el endpoint que reinyecta mensajes de la DLT.
+      reinyeccion-dlt: notificaciones-dlt-reinyeccion
+    # La DLT tiene las mismas particiones que el topic principal: el registro
+    # fallido va a la misma particion de la que vino.
+    particiones: 3
+    replicas: 1
+    retencion-ms:
+      alertas-fraude-dlt: 1209600000   # 14 dias para revisar y reinyectar
+    reintentos:
+      intervalo-inicial-ms: 1000
+      multiplicador: 2.0
+      maximo: 3                        # reintentos a los 1s, 2s y 4s

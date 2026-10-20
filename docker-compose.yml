@@ -35,6 +35,8 @@ x-backend-common: &backend-common
     # Secreto compartido para llamadas servicio-a-servicio (ver ms-pedidos
     # InternalTokenFilter y los PedidoClient). Cambialo en tu .env al desplegar.
     INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-cafeteria-interno-local}
+    # Kafka (Fase 8): listener interno de la red de Docker.
+    KAFKA_BOOTSTRAP_SERVERS: kafka:29092
 
 services:
   mysql:
@@ -186,6 +188,84 @@ services:
       rabbitmq-1:
         condition: service_healthy
 
+  # ── Kafka (Fase 8): streaming de eventos, en paralelo a RabbitMQ ──────────
+  # RabbitMQ sigue moviendo los comandos/tareas del negocio; Kafka retiene el
+  # stream de transacciones de pago para analizarlo con Kafka Streams
+  # (ms-antifraude), con varios consumidores y replay (ver docs/EP2_PLAN.md
+  # Fase 8). Un solo broker: replication factor 1 en todos los topics.
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: "-Xms64m -Xmx192m"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    hostname: kafka
+    restart: unless-stopped
+    mem_limit: 1g
+    depends_on:
+      - zookeeper
+    ports:
+      # Solo para herramientas en tu maquina (localhost:9092). En la EC2 el
+      # Security Group NO abre este puerto: Kafka no queda expuesto a internet.
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Dos listeners: kafka:29092 para los contenedores y localhost:9092
+      # para el host.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # exactly_once_v2 de Kafka Streams usa transacciones: con un solo
+      # broker, el log de transacciones tambien va con 1 replica.
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Los topics los crea cada aplicacion (beans NewTopic), nunca el broker
+      # al vuelo: asi particiones y retencion quedan versionadas en el codigo.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Retencion por defecto del broker (guia 3.3.2); cada topic fija la suya.
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+
+  # Interfaz web de Kafka: topics, mensajes, consumer groups y su lag.
+  # Publicada en el 8095 porque el 8080 lo usa bff-gateway.
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    mem_limit: 512m
+    ports:
+      - "8095:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: cafeteria
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      JAVA_OPTS: "-Xms64m -Xmx256m"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   ms-productos:
     <<: *backend-common
     build:
@@ -306,6 +386,8 @@ services:
         condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8085/actuator/health"]
       interval: 10s
@@ -401,6 +483,8 @@ services:
         condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8089/actuator/health"]
       interval: 10s
@@ -439,6 +523,28 @@ services:
       retries: 30
       start_period: 60s
 
+  # Fase 8: monitoreo antifraude con Kafka Streams. Sin base de datos: su
+  # estado (total por cliente, conteos por ventana) vive en state stores de
+  # Kafka Streams respaldados por topics changelog.
+  ms-antifraude:
+    <<: *backend-common
+    build:
+      context: ./cafeteria-backend/cafeteria-backend
+      args:
+        MODULE: ms-antifraude
+    container_name: ms-antifraude
+    ports:
+      - "8091:8091"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
   bff-gateway:
     <<: *backend-common
     build:
@@ -470,6 +576,7 @@ services:
       MS_REPORTES_URL: http://ms-reportes:8088
       MS_NOTIFICACIONES_URL: http://ms-notificaciones:8089
       MS_RABBITMQ_ADMIN_URL: http://ms-rabbitmq-admin:8090
+      MS_ANTIFRAUDE_URL: http://ms-antifraude:8091
     depends_on:
       ms-productos:
         condition: service_healthy
@@ -484,6 +591,8 @@ services:
       ms-empleados:
         condition: service_healthy
       ms-rabbitmq-admin:
+        condition: service_healthy
+      ms-antifraude:
         condition: service_healthy
       ms-proveedores:
         condition: service_healthy
@@ -504,6 +613,7 @@ services:
         VITE_AZURE_REDIRECT_URI: ${VITE_AZURE_REDIRECT_URI:-http://localhost:4200}
         VITE_API_SCOPES: ${VITE_API_SCOPES:-api://cafeteria-backend/pedidos.read,api://cafeteria-backend/pedidos.write}
         VITE_RABBITMQ_DASHBOARD_URL: ${VITE_RABBITMQ_DASHBOARD_URL:-http://localhost:15672}
+        VITE_KAFKA_UI_URL: ${VITE_KAFKA_UI_URL:-http://localhost:8095}
     container_name: cafeteria-frontend
     restart: unless-stopped
     # nginx escucha 80/443 dentro del contenedor (ver Dockerfile); en local
@@ -519,6 +629,9 @@ volumes:
   rabbitmq_1_data:
   rabbitmq_2_data:
   rabbitmq_3_data:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
   ms_productos_data:
   ms_inventario_data:
   ms_pedidos_data:

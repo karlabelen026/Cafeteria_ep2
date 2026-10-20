@@ -5,6 +5,7 @@ import cl.duoc.cafeteria.common.evento.PedidoCreadoEvent;
 import cl.duoc.cafeteria.common.exception.NonRecoverableMessageException;
 import cl.duoc.cafeteria.common.exception.RecoverableMessageException;
 import cl.duoc.cafeteria.pagos.messaging.producer.PagoEventPublisher;
+import cl.duoc.cafeteria.pagos.messaging.producer.TransaccionStreamPublisher;
 import cl.duoc.cafeteria.pagos.model.Pago;
 import cl.duoc.cafeteria.pagos.repository.EventoProcesadoRepository;
 import cl.duoc.cafeteria.pagos.repository.PagoRepository;
@@ -41,6 +42,9 @@ class PasarelaPagoServiceTest {
 
     @Mock
     private PagoEventPublisher eventPublisher;
+
+    @Mock
+    private TransaccionStreamPublisher transaccionStreamPublisher;
 
     @InjectMocks
     private PasarelaPagoService service;

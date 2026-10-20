@@ -2,9 +2,11 @@ package cl.duoc.cafeteria.pagos.service;
 
 import cl.duoc.cafeteria.common.evento.PagoProcesadoEvent;
 import cl.duoc.cafeteria.common.evento.PedidoCreadoEvent;
+import cl.duoc.cafeteria.common.evento.TransaccionPagoEvent;
 import cl.duoc.cafeteria.common.exception.NonRecoverableMessageException;
 import cl.duoc.cafeteria.common.exception.RecoverableMessageException;
 import cl.duoc.cafeteria.pagos.messaging.producer.PagoEventPublisher;
+import cl.duoc.cafeteria.pagos.messaging.producer.TransaccionStreamPublisher;
 import cl.duoc.cafeteria.pagos.model.EventoProcesado;
 import cl.duoc.cafeteria.pagos.model.Pago;
 import cl.duoc.cafeteria.pagos.repository.EventoProcesadoRepository;
@@ -41,13 +43,16 @@ public class PasarelaPagoService {
     private final PagoRepository pagoRepository;
     private final EventoProcesadoRepository eventoProcesadoRepository;
     private final PagoEventPublisher eventPublisher;
+    private final TransaccionStreamPublisher transaccionStreamPublisher;
 
     public PasarelaPagoService(PagoRepository pagoRepository,
             EventoProcesadoRepository eventoProcesadoRepository,
-            PagoEventPublisher eventPublisher) {
+            PagoEventPublisher eventPublisher,
+            TransaccionStreamPublisher transaccionStreamPublisher) {
         this.pagoRepository = pagoRepository;
         this.eventoProcesadoRepository = eventoProcesadoRepository;
         this.eventPublisher = eventPublisher;
+        this.transaccionStreamPublisher = transaccionStreamPublisher;
     }
 
     @Transactional
@@ -81,6 +86,20 @@ public class PasarelaPagoService {
                 aprobado,
                 guardado.getMonto(),
                 guardado.getMetodoPago()));
+
+        // Ademas del evento de RabbitMQ (que dispara el resto del flujo de
+        // negocio), la transaccion se publica en Kafka para el monitoreo
+        // antifraude en tiempo real (Fase 8). No afecta al pago si falla.
+        transaccionStreamPublisher.publicar(new TransaccionPagoEvent(
+                UUID.randomUUID(),
+                Instant.now(),
+                1,
+                evento.pedidoId(),
+                guardado.getId(),
+                TransaccionPagoEvent.clienteOMostrador(evento.clienteEmail()),
+                guardado.getMonto(),
+                guardado.getMetodoPago(),
+                aprobado));
 
         eventoProcesadoRepository.save(new EventoProcesado(evento.eventId(), Instant.now()));
     }

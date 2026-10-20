@@ -23,6 +23,11 @@ output "rabbitmq_management_url" {
   value       = "http://${aws_eip.backend.public_ip}:15672"
 }
 
+output "kafka_ui_url" {
+  description = "Kafka UI (topics, consumer groups y lag). Solo accesible desde my_ip_cidr."
+  value       = "http://${aws_eip.backend.public_ip}:8095"
+}
+
 output "frontend_ssh_command" {
   description = "Comando para conectarse por SSH a la EC2 de frontend con la llave del Learner Lab."
   value       = "ssh -i labsuser.pem ubuntu@${aws_eip.frontend.public_ip}"

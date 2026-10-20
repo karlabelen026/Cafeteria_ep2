@@ -8,6 +8,7 @@ import DashboardHome from './pages/dashboard/DashboardHome.jsx';
 import Alertas from './pages/dashboard/Alertas.jsx';
 import Recetas from './pages/dashboard/Recetas.jsx';
 import Mensajeria from './pages/dashboard/Mensajeria.jsx';
+import Antifraude from './pages/dashboard/Antifraude.jsx';
 import Chat from './pages/dashboard/Chat.jsx';
 import Pedidos from './pages/Pedidos.jsx';
 import Productos from './pages/Productos.jsx';
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="alertas" element={<Alertas />} />
         <Route path="chat" element={<Chat />} />
         <Route path="mensajeria" element={guarded(<Mensajeria />, ['ADMIN'])} />
+        <Route path="antifraude" element={guarded(<Antifraude />, ['ADMIN'])} />
       </Route>
     </Routes>
   );

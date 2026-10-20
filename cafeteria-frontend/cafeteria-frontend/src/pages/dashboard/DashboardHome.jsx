@@ -264,7 +264,7 @@ export default function DashboardHome() {
               {alertas.slice(0, 6).map((a) => (
                 <li
                   key={a.id}
-                  className={`dash-alert dash-alert--${a.tipo === 'STOCK_BAJO' ? 'stock' : a.tipo === 'DLQ' ? 'dlq' : 'pedido'}`}
+                  className={`dash-alert dash-alert--${a.tipo === 'STOCK_BAJO' ? 'stock' : a.tipo === 'DLQ' || a.tipo === 'FRAUDE' ? 'dlq' : 'pedido'}`}
                 >
                   {a.mensaje}
                 </li>

@@ -33,6 +33,7 @@
         <module>ms-reportes</module>
         <module>ms-notificaciones</module>
         <module>ms-rabbitmq-admin</module>
+        <module>ms-antifraude</module>
         <module>bff-gateway</module>
     </modules>
 

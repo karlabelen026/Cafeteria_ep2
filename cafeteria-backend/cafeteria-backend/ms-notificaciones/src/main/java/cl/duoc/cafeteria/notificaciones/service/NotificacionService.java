@@ -1,5 +1,6 @@
 package cl.duoc.cafeteria.notificaciones.service;
 
+import cl.duoc.cafeteria.common.evento.AlertaFraudeEvent;
 import cl.duoc.cafeteria.common.evento.PagoProcesadoEvent;
 import cl.duoc.cafeteria.common.evento.PedidoEstadoActualizadoEvent;
 import cl.duoc.cafeteria.common.evento.StockBajoEvent;
@@ -20,6 +21,9 @@ public interface NotificacionService {
 
     /** stock.bajo: registra una alerta STOCK_BAJO para el dashboard. */
     void registrarAlertaStockBajo(StockBajoEvent evento);
+
+    /** alertas-fraude (Kafka): registra una alerta FRAUDE para el dashboard. */
+    void registrarAlertaFraude(AlertaFraudeEvent alerta);
 
     /** pedido.estado.actualizado: registra una alerta PEDIDO_LISTO cuando corresponde. */
     void registrarAlertaCambioEstado(PedidoEstadoActualizadoEvent evento);

@@ -24,6 +24,7 @@ COPY ms-proveedores/pom.xml ms-proveedores/pom.xml
 COPY ms-reportes/pom.xml ms-reportes/pom.xml
 COPY ms-notificaciones/pom.xml ms-notificaciones/pom.xml
 COPY ms-rabbitmq-admin/pom.xml ms-rabbitmq-admin/pom.xml
+COPY ms-antifraude/pom.xml ms-antifraude/pom.xml
 COPY bff-gateway/pom.xml bff-gateway/pom.xml
 RUN chmod +x mvnw && ./mvnw -q -B -pl ${MODULE} -am dependency:go-offline
 
@@ -36,5 +37,9 @@ RUN ./mvnw -q -B -pl ${MODULE} -am package -DskipTests
 FROM eclipse-temurin:17-jre-alpine
 ARG MODULE
 WORKDIR /app
+# Los productores de Kafka (Fase 8) comprimen con snappy, cuya libreria nativa
+# esta compilada contra glibc: Alpine usa musl, asi que se agrega la capa de
+# compatibilidad (sin esto: "Could not initialize class org.xerial.snappy.Snappy").
+RUN apk add --no-cache gcompat libstdc++
 COPY --from=build /workspace/${MODULE}/target/${MODULE}.jar app.jar
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

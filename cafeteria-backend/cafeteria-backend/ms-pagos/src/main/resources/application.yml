@@ -32,6 +32,30 @@ spring:
         acknowledge-mode: manual
         prefetch: 5
         default-requeue-rejected: false
+  # Kafka (Fase 8): ms-pagos solo PRODUCE al topic de transacciones, que
+  # analiza ms-antifraude con Kafka Streams. Tuning de las guias 3.3.1/3.3.2.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # Durabilidad: el lider espera a todas las replicas en sincronia.
+      acks: all
+      # Throughput: agrupa mensajes en lotes de hasta 32 KB comprimidos.
+      batch-size: 32768
+      compression-type: snappy
+      properties:
+        # Sin duplicados aunque el productor reintente un envio.
+        enable.idempotence: true
+        linger.ms: 20
+        # Si Kafka no esta disponible el pago NO debe quedar bloqueado:
+        # el envio falla rapido y solo se registra en el log.
+        max.block.ms: 3000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        # El consumidor (Kafka Streams) ya sabe el tipo: no se agregan
+        # headers con el nombre de la clase Java.
+        spring.json.add.type.headers: false
 
 server:
   port: 8085
@@ -61,3 +85,13 @@ app:
       message-ttl-ms: 600000
       max-length: 10000
       dlq-ttl-ms: 86400000
+  # Topics de Kafka (Fase 8). Nombre, particiones y retencion SOLO aqui
+  # (KafkaTopicsProperties + KafkaConfig), igual que app.rabbitmq.
+  kafka:
+    topics:
+      transacciones: cafeteria.pagos.transacciones
+    particiones: 3
+    # Un solo broker en Docker Compose / EC2: en produccion seria 3.
+    replicas: 1
+    retencion-ms:
+      transacciones: 604800000   # 7 dias: permite replay del historial

@@ -811,3 +811,112 @@ El controller no importa nada de `org.springframework.amqp` ni del cliente HTTP:
 - **Toda la API exige rol ADMIN** (`anyRequest().hasAuthority("ADMIN")` en `SecurityConfig`), no solo
   autenticación: a diferencia del resto de los microservicios, aquí no hay ninguna acción de solo lectura
   permitida a otros roles (ver sección 3.8: "Solo rol ADMIN"). Swagger UI y el health check quedan abiertos.
+
+---
+
+## Anexo Fase 8: Kafka + Kafka Streams (Unidad 3)
+
+Adaptación de la guía 3.2.2 ("Monitoreo de transacciones bancarias en tiempo real") al dominio de la
+cafetería: **monitoreo antifraude de pagos**. RabbitMQ queda igual (comandos y tareas del negocio); Kafka
+se agrega en paralelo como plataforma de streaming (eventos retenidos, varios consumidores, replay).
+
+### Infraestructura (`docker-compose.yml`)
+
+| Servicio | Imagen | Notas |
+|---|---|---|
+| `zookeeper` | confluentinc/cp-zookeeper:7.5.0 | `mem_limit 384m`, heap 192 MB |
+| `kafka` | confluentinc/cp-kafka:7.5.0 | Listeners `PLAINTEXT://kafka:29092` y `PLAINTEXT_HOST://localhost:9092`; `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`; retención por defecto 168 h; `mem_limit 1g`, heap 512 MB; healthcheck con `kafka-broker-api-versions` |
+| `kafka-ui` | provectuslabs/kafka-ui | Publicada en el **8095** (el 8080 es del BFF); `mem_limit 512m` |
+| `ms-antifraude` | módulo nuevo | Puerto 8091, sin base de datos |
+
+Como Kafka Streams usa `exactly_once_v2` (transacciones) y hay un solo broker, también se fijan
+`KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1` y `KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1`.
+
+### Pipeline
+
+```
+ms-pagos (PasarelaPagoService)
+  └─ TransaccionStreamPublisher ──> cafeteria.pagos.transacciones   key = clienteEmail ("mostrador" si no hay)
+                                         │
+     ms-antifraude · AntifraudeTopology (application-id cafeteria-antifraude, exactly_once_v2)
+       Source → filter(monto ≥ 10) → mapValues(+ montoUsd) → split()
+         ├─ monto > 50.000 CLP → AlertaFraudeEvent ALTA  "Transacción inusualmente alta vía {metodoPago}"
+         ├─ aprobado = false   → AlertaFraudeEvent MEDIA "Pago rechazado vía {metodoPago}"
+         ├─ groupByKey().aggregate() → KTable total-por-cliente ──> cafeteria.antifraude.totales-por-cliente
+         └─ groupByKey().windowedBy(tumbling 5 min).count() > 5 → AlertaFraudeEvent MEDIA "Ráfaga de pagos"
+       Sink ──> alertas-fraude   key = cliente
+                  ├─ ms-notificaciones · AlertaFraudeListener (group notificaciones-antifraude)
+                  │     → alerta FRAUDE del dashboard; errores → alertas-fraude.DLT
+                  └─ ms-antifraude · AlertasFraudeListener (group antifraude-monitor)
+                        → últimas alertas en memoria (GET /api/antifraude/alertas)
+```
+
+### Topics
+
+| Topic | Particiones | RF | Key | Retención | Productor | Consumidores |
+|---|---|---|---|---|---|---|
+| `cafeteria.pagos.transacciones` | 3 | 1 | email del cliente | 7 días | ms-pagos, simulador de ms-antifraude | Kafka Streams (`cafeteria-antifraude`) |
+| `cafeteria.antifraude.totales-por-cliente` | 3 | 1 | email del cliente | **compactado** | Kafka Streams | (consulta/replay) |
+| `alertas-fraude` | 3 | 1 | email del cliente | 30 días | Kafka Streams | `notificaciones-antifraude`, `antifraude-monitor` |
+| `alertas-fraude.DLT` | 3 | 1 | la del original | 14 días | DeadLetterPublishingRecoverer | grupo `notificaciones-dlt-reinyeccion` (solo al reinyectar) |
+| `cafeteria-antifraude-*-changelog` | 3 | 1 | — | (interno) | Kafka Streams | Kafka Streams (restaura los state stores) |
+
+Cada aplicación crea sus topics con beans `NewTopic` (`TopicBuilder`): ms-pagos y ms-antifraude el de
+transacciones, ms-antifraude los de totales y alertas, ms-notificaciones su DLT. RF 1 porque hay un solo
+broker; en producción serían 3 brokers con RF 3 y `min.insync.replicas=2`.
+
+### Configuración centralizada
+
+- Topics, consumer groups, particiones, réplicas y retención: bloque `app.kafka` de cada `application.yml`,
+  mapeado por `KafkaTopicsProperties` (no `KafkaProperties`, para no chocar con la de Spring Boot).
+- Reglas: bloque `app.antifraude` (`monto-minimo`, `tasa-clp-usd`, `umbral-alto`,
+  `max-transacciones-ventana`, `ventana-minutos`, nombres de los state stores), mapeado por
+  `AntifraudeProperties`.
+- `spring.kafka.bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}`.
+- Los services nunca usan `KafkaTemplate`: `TransaccionStreamPublisher` (ms-pagos),
+  `TransaccionPublisher` (ms-antifraude) y `ReinyeccionDltService` (ms-notificaciones).
+
+### Productor (ms-pagos)
+
+`acks=all`, `enable.idempotence=true`, `linger.ms=20`, `batch.size=32768`, `compression.type=snappy`,
+`JsonSerializer` sin headers de tipo. `max.block.ms=3000` y el `CompletableFuture` de `send` solo registra
+el error: si Kafka no está disponible el pago se completa igual.
+
+### Manejo de errores del consumidor (ms-notificaciones, guía 3.3.3)
+
+- `ErrorHandlingDeserializer` envolviendo `JsonDeserializer`: un JSON inválido va a la DLT, sin bucle.
+- `@Valid` + Bean Validation sobre `AlertaFraudeEvent` (validador registrado con `KafkaListenerConfigurer`).
+- `DefaultErrorHandler` + `ExponentialBackOffWithMaxRetries(3)`: reintentos a 1 s, 2 s y 4 s; después
+  `DeadLetterPublishingRecoverer` → `alertas-fraude.DLT`, misma partición.
+- No se reintentan: `NonRecoverableMessageException`, `MethodArgumentNotValidException` (payload inválido)
+  y `ConstraintViolationException` (la entidad no pasa la validación al guardarse).
+- Idempotencia por `eventId` en `eventos_procesados`.
+- `POST /api/notificaciones/antifraude/dlt/reinyectar?max=100` (ADMIN): reinyecta solo lo que había en la
+  DLT al momento de la llamada; si un mensaje vuelve a fallar, queda para la próxima.
+
+### Decisiones de diseño
+
+- **State stores en memoria** (`Stores.inMemoryKeyValueStore` / `inMemoryWindowStore`), respaldados por
+  su topic changelog: evitan depender de RocksDB nativo y de disco en el contenedor.
+- **Sin caché en Kafka Streams** (`statestore.cache.max.bytes=0`): la regla de ráfaga necesita ver cada
+  conteo, y emite una sola alerta por ventana (cuando el conteo pasa a máximo + 1).
+- **Imagen Alpine con `gcompat` y `libstdc++`**: la librería nativa de snappy está compilada contra glibc.
+- **La prueba de carga usa montos normales** (1.500–20.000 CLP, todas aprobadas): mide rendimiento sin
+  inundar el dashboard de alertas.
+- **ms-antifraude excluye `RabbitAutoConfiguration`**: no usa RabbitMQ, pero `cafeteria-common` trae la
+  dependencia y su health check lo dejaba en 503.
+
+### Pruebas (sin broker)
+
+- `AntifraudeTopologyTest` (TopologyTestDriver): filtro, sin alerta, ALTA, MEDIA por rechazo, ráfaga con 6
+  pagos y no con 5, total acumulado y conversión a USD.
+- `SimuladorServiceTest`, `KafkaTransaccionStreamPublisherTest` (mock de `KafkaTemplate`),
+  `AlertaFraudeListenerTest` (idempotencia) y `KafkaErrorHandlerTest` (DLT y reintentos).
+- Los `contextLoads` usan `spring.kafka.streams.auto-startup=false`, `spring.kafka.listener.auto-startup=false`
+  y `spring.kafka.admin.auto-create=false`: no se conectan a un broker.
+
+### AWS
+
+`user_data_backend.sh.tftpl` levanta también `zookeeper kafka kafka-ui ms-antifraude`. El Security Group
+abre el **8095** (Kafka UI) solo para `my_ip_cidr`; el 9092 no se abre. Output nuevo: `kafka_ui_url`. El
+frontend recibe `VITE_KAFKA_UI_URL`.

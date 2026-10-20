@@ -22,6 +22,8 @@ ARG VITE_API_SCOPES=api://cafeteria-backend/pedidos.read,api://cafeteria-backend
 # Panel de administracion propio de RabbitMQ (puerto 15672 del nodo 1): a donde
 # lleva el boton "Dashboard RabbitMQ" que solo ve el rol ADMIN.
 ARG VITE_RABBITMQ_DASHBOARD_URL=http://localhost:15672
+# Kafka UI (topics, consumer groups y lag): link de la pagina Antifraude.
+ARG VITE_KAFKA_UI_URL=http://localhost:8095
 ENV VITE_AUTH_DISABLED=$VITE_AUTH_DISABLED \
     VITE_API_BASE_URL=$VITE_API_BASE_URL \
     VITE_AZURE_CLIENT_ID=$VITE_AZURE_CLIENT_ID \
@@ -29,7 +31,8 @@ ENV VITE_AUTH_DISABLED=$VITE_AUTH_DISABLED \
     VITE_AZURE_AUTHORITY=$VITE_AZURE_AUTHORITY \
     VITE_AZURE_REDIRECT_URI=$VITE_AZURE_REDIRECT_URI \
     VITE_API_SCOPES=$VITE_API_SCOPES \
-    VITE_RABBITMQ_DASHBOARD_URL=$VITE_RABBITMQ_DASHBOARD_URL
+    VITE_RABBITMQ_DASHBOARD_URL=$VITE_RABBITMQ_DASHBOARD_URL \
+    VITE_KAFKA_UI_URL=$VITE_KAFKA_UI_URL
 
 COPY . .
 RUN npm run build

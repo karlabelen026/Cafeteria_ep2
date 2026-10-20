@@ -1,5 +1,6 @@
 package cl.duoc.cafeteria.notificaciones.service;
 
+import cl.duoc.cafeteria.common.evento.AlertaFraudeEvent;
 import cl.duoc.cafeteria.common.evento.PagoProcesadoEvent;
 import cl.duoc.cafeteria.common.evento.PedidoEstadoActualizadoEvent;
 import cl.duoc.cafeteria.common.evento.StockBajoEvent;
@@ -75,6 +76,20 @@ public class NotificacionServiceImpl implements NotificacionService {
                 + " (minimo " + evento.stockMinimo() + ")");
         alerta.setLeida(false);
         alerta.setFecha(Instant.now());
+        alertaRepository.save(alerta);
+    }
+
+    @Override
+    @Transactional
+    public void registrarAlertaFraude(AlertaFraudeEvent evento) {
+        Alerta alerta = new Alerta();
+        alerta.setTipo("FRAUDE");
+        String detalleMonto = evento.monto() > 0
+                ? " (" + String.format(java.util.Locale.ROOT, "%,.0f", evento.monto()).replace(',', '.') + " CLP)"
+                : "";
+        alerta.setMensaje("[" + evento.severidad() + "] " + evento.cliente() + ": " + evento.motivo() + detalleMonto);
+        alerta.setLeida(false);
+        alerta.setFecha(evento.detectadaEn());
         alertaRepository.save(alerta);
     }
 

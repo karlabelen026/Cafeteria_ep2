@@ -3,12 +3,14 @@
 Sistema de gestión para una cafetería: tienda pública con carrito y pago, y un portal interno por
 roles (pedidos, inventario, recetas, clientes, pagos, empleados, proveedores, reportes, alertas y chat).
 Los microservicios se comunican de forma asíncrona con **RabbitMQ** (colas, exchanges, bindings, DLX/DLQ
-y ACK manual) sobre un **cluster de 3 nodos**.
+y ACK manual) sobre un **cluster de 3 nodos**, y cada pago se publica además en **Apache Kafka**, donde
+**Kafka Streams** lo analiza en tiempo real para detectar posibles fraudes (Fase 8).
 
 - **Backend:** Java 17, Spring Boot 3.3, Maven multi-módulo — `cafeteria-backend/cafeteria-backend`
 - **Frontend:** React 18 + Vite, servido con nginx — `cafeteria-frontend/cafeteria-frontend`
 - **Seguridad:** Azure Entra ID (MSAL en el frontend, validación de JWT en el BFF y en cada microservicio)
 - **Datos:** MySQL 8.4, una base por microservicio
+- **Mensajería:** RabbitMQ 3.13 (cluster de 3 nodos) y Apache Kafka 7.5 (Confluent, 1 broker + Zookeeper)
 - **Infraestructura:** Docker Compose en local; Terraform + GitHub Actions para AWS (2 EC2 + API Gateway)
 
 ---
@@ -20,7 +22,9 @@ Navegador ──> Frontend (nginx)
      │
      └──> API Gateway (AWS) ──> BFF Gateway :8080 ──> microservicios ──> MySQL (una base por servicio)
                                                           │
-                                                          └──> RabbitMQ (cluster: rabbitmq-1, -2, -3)
+                                                          ├──> RabbitMQ (cluster: rabbitmq-1, -2, -3)
+                                                          │
+                                                          └──> Kafka ──> ms-antifraude (Kafka Streams)
 ```
 
 | Servicio | Puerto | Qué hace |
@@ -36,9 +40,13 @@ Navegador ──> Frontend (nginx)
 | `ms-reportes` | 8088 | Ventas diarias y KPIs del dashboard |
 | `ms-notificaciones` | 8089 | Boletas, alertas y chat del equipo |
 | `ms-rabbitmq-admin` | 8090 | Administración de RabbitMQ (colas, exchanges, bindings, DLQ) |
+| `ms-antifraude` | 8091 | Monitoreo antifraude de pagos con Kafka Streams |
 | `frontend` | 4200 | Tienda pública y portal del equipo |
 | `mysql` | 3306 | Base de datos |
 | `rabbitmq-1 / 2 / 3` | 15672 / 15673 / 15674 | Panel de administración de cada nodo (AMQP 5672 solo en el nodo 1) |
+| `kafka` | 9092 | Broker de Kafka (`kafka:29092` dentro de Docker; 9092 solo para tu máquina) |
+| `zookeeper` | — | Coordinación del broker de Kafka (sin puerto publicado) |
+| `kafka-ui` | 8095 | Interfaz web de Kafka: topics, mensajes, consumer groups y lag |
 
 `cafeteria-common` es una librería compartida con los eventos de dominio y el manejo de ACK.
 
@@ -97,6 +105,7 @@ El rol lo entrega el backend (`GET /api/me`, leído del JWT ya validado); el fro
 | Reportes | sí | sí | — | sí | — |
 | Alertas y chat del equipo | sí | sí | sí | sí | sí |
 | Mensajería y panel de RabbitMQ | sí | — | — | — | — |
+| Antifraude (Kafka) | sí | — | — | — | — |
 
 Eliminar es exclusivo de ADMIN en todos los módulos. Todas las vistas se refrescan solas cada 8 segundos,
 así que lo que un rol crea o modifica lo ven los demás sin recargar.
@@ -222,7 +231,117 @@ Overview y de cada cola, con el refresco en 5 segundos.
 
 ---
 
-## 5. Seguridad
+## 5. Streaming con Kafka: monitoreo antifraude (Fase 8)
+
+### Pipeline
+
+```
+ms-pagos ──(TransaccionPagoEvent, key = cliente)──> cafeteria.pagos.transacciones
+                                                         │
+                                       ms-antifraude (Kafka Streams, application-id cafeteria-antifraude)
+                                         1. Source      lee la transacción
+                                         2. Filtro      descarta montos < 10 CLP
+                                         3. Enriquecer  agrega el monto en USD (tasa simulada 950)
+                                         4. Detectar    > 50.000 CLP -> ALTA · pago rechazado -> MEDIA
+                                         5. Agregar     total gastado por cliente (state store total-por-cliente)
+                                                        ──> cafeteria.antifraude.totales-por-cliente (compactado)
+                                         6. Ventana     > 5 pagos del mismo cliente en 5 min -> MEDIA "Ráfaga"
+                                         7. Sink        ──> alertas-fraude (key = cliente)
+                                                                   │
+                                   ┌───────────────────────────────┴─────────────────────────────┐
+                ms-notificaciones (group notificaciones-antifraude)      ms-antifraude (group antifraude-monitor)
+                alerta FRAUDE en la página Alertas del dashboard         últimas alertas en la página Antifraude
+                errores: reintentos 1s/2s/4s -> alertas-fraude.DLT
+```
+
+Umbrales, tasa de cambio, topics y consumer groups se configuran solo en `application.yml`
+(`app.kafka` y `app.antifraude`) y se leen con `KafkaTopicsProperties` / `AntifraudeProperties`.
+
+### Kafka y RabbitMQ en este proyecto
+
+| | RabbitMQ | Kafka |
+|---|---|---|
+| Para qué se usa | Comandos y tareas del negocio: cobrar, descontar stock, generar la boleta | Stream de transacciones para análisis en tiempo real |
+| Qué pasa con el mensaje | Se borra apenas se confirma (ACK) | Se conserva según la retención (7 días); se puede volver a leer |
+| Consumidores | Cada cola tiene su consumidor | Varios consumer groups leen el mismo topic, cada uno con su avance |
+| Por qué aquí | Ruteo flexible (exchanges, bindings), DLQ por cola, ACK por mensaje | Orden por cliente, replay del historial, agregaciones y ventanas con Kafka Streams |
+
+RabbitMQ no cambió: el pago sigue disparando el resto del flujo por RabbitMQ. Kafka se agregó en
+paralelo; si el broker de Kafka no está disponible, el pago igual se completa y el error solo se registra.
+
+### Conceptos aplicados
+
+- **Particiones y keys:** cada topic tiene 3 particiones. La key es el email del cliente, así que todas
+  las transacciones de un cliente caen en la misma partición y se procesan en orden; eso hace correctos
+  el total por cliente y el conteo por ventana.
+- **Offsets:** cada consumer group guarda hasta dónde leyó en cada partición. Al reiniciar un servicio
+  sigue desde ahí, sin perder ni repetir mensajes.
+- **Consumer groups:** `alertas-fraude` lo leen dos grupos independientes (`notificaciones-antifraude` y
+  `antifraude-monitor`), y ambos reciben todas las alertas. Kafka Streams usa su `application-id`
+  (`cafeteria-antifraude`) como grupo.
+- **Consumer lag:** cuántos mensajes le faltan a un grupo para ponerse al día. Se ve en Kafka UI →
+  **Consumers** → elige el grupo → columna **Lag** por partición. Después de una prueba de carga el lag
+  sube y baja a 0 en segundos.
+- **Replicación y acks:** los productores usan `acks=all` e `enable.idempotence=true` (sin duplicados
+  aunque reintenten), más `linger.ms=20`, `batch.size=32768` y compresión `snappy`. Con un solo broker el
+  replication factor es 1.
+- **Exactly-once:** Kafka Streams corre con `processing.guarantee=exactly_once_v2`.
+- **Retención y compactación:** transacciones 7 días, alertas 30 días, DLT 14 días. El topic de totales es
+  **compactado**: Kafka guarda solo el último total de cada cliente.
+- **Interactive Queries:** `GET /api/antifraude/totales` lee el state store de Kafka Streams directamente,
+  sin base de datos.
+
+### Manejo de errores del consumidor (guía 3.3.3)
+
+En `ms-notificaciones`, el consumidor de `alertas-fraude`:
+
+- Usa `ErrorHandlingDeserializer`: un JSON inválido no deja al consumidor en un bucle, va a la DLT.
+- Valida el payload con `@Valid` y Bean Validation; si no pasa, va directo a la DLT sin reintentos.
+- Reintenta los errores transitorios con backoff exponencial (1 s, 2 s, 4 s) y, agotados, publica el
+  mensaje en `alertas-fraude.DLT`.
+- Es idempotente por `eventId` (tabla `eventos_procesados`).
+- `POST /api/notificaciones/antifraude/dlt/reinyectar?max=100` (ADMIN) devuelve a `alertas-fraude` los
+  mensajes que había en la DLT, por ejemplo después de corregir la causa del error.
+
+### Endpoints (`/api/antifraude/**`, solo ADMIN)
+
+| Verbo | Ruta | Qué hace |
+|---|---|---|
+| POST | `/simular` | Publica una transacción de prueba |
+| POST | `/carga?cantidad=10000` | Prueba de carga: publica N transacciones y devuelve el tiempo y mensajes/s |
+| GET | `/totales`, `/totales/{cliente}` | Total gastado por cliente (Interactive Queries) |
+| GET | `/alertas?cantidad=50` | Últimas alertas detectadas |
+
+La prueba de carga usa montos normales (todas aprobadas y bajo el umbral) para no inundar las alertas:
+solo puede disparar la regla de ráfaga, una vez por cliente.
+
+### Cómo probarlo
+
+1. `docker compose up -d --build` y entra como ADMIN a **Antifraude (Kafka)** en el dashboard.
+2. Simula estas transacciones (desde la página o por la API):
+
+```bash
+TOKEN=<access token ADMIN>
+api() { curl -s -X POST "http://localhost:8080/api/antifraude/$1" -H "Authorization: Bearer $TOKEN" \
+          -H "Content-Type: application/json" ${2:+-d "$2"}; echo; }
+api simular '{"clienteEmail":"juan@mail.cl","monto":500,"metodoPago":"DEBITO"}'     # sin alerta
+api simular '{"clienteEmail":"juan@mail.cl","monto":60000,"metodoPago":"CREDITO"}'  # alerta ALTA
+api simular '{"clienteEmail":"juan@mail.cl","monto":5,"metodoPago":"EFECTIVO"}'     # filtrada
+api "carga?cantidad=10000"                                                         # prueba de carga
+```
+
+3. La alerta ALTA aparece en la página Antifraude, en **Alertas** del dashboard y en Kafka UI
+   (http://localhost:8095 → Topics → `alertas-fraude` → Messages). El total de `juan@mail.cl` queda en
+   60.500 CLP: los 5 CLP se filtran.
+4. Una compra real en la tienda de más de 50.000 CLP también genera la alerta, porque ms-pagos publica
+   cada pago en Kafka.
+
+En local, Kafka UI queda en http://localhost:8095. En AWS, en `http://<IP_backend>:8095`, abierto solo para
+tu IP (`MY_IP_CIDR`); el puerto 9092 del broker no se abre a internet.
+
+---
+
+## 6. Seguridad
 
 - **Frontend:** MSAL hace el login con Azure Entra ID y adjunta el token como `Authorization: Bearer`
   en cada llamada (`src/services/apiClient.js`).
@@ -238,7 +357,7 @@ Overview y de cada cola, con el refresco en 5 segundos.
 
 ---
 
-## 6. Variables de entorno
+## 7. Variables de entorno
 
 Todas están documentadas en [`.env.example`](.env.example). Las principales:
 
@@ -253,12 +372,14 @@ Todas están documentadas en [`.env.example`](.env.example). Las principales:
 | `DB_PASSWORD` | Clave de MySQL |
 | `RABBITMQ_USER`, `RABBITMQ_PASSWORD`, `RABBITMQ_ERLANG_COOKIE` | Broker y cluster |
 | `INTERNAL_API_TOKEN` | Secreto para llamadas entre microservicios |
+| `KAFKA_BOOTSTRAP_SERVERS` | Broker de Kafka (en Docker: `kafka:29092`) |
+| `VITE_KAFKA_UI_URL` | A dónde lleva el botón "Abrir Kafka UI" de la página Antifraude |
 
 El archivo `.env` nunca se sube al repositorio.
 
 ---
 
-## 7. Despliegue en AWS
+## 8. Despliegue en AWS
 
 Terraform (`infra/terraform`) crea dos EC2 —backend y frontend—, sus Elastic IP, un volumen para MySQL
 y un API Gateway delante del BFF. Se ejecuta con GitHub Actions; el detalle está en
@@ -283,12 +404,12 @@ workflow. Para actualizar el código sin recrear la instancia: `git pull` en `/o
 
 ---
 
-## 8. Pruebas
+## 9. Pruebas
 
 ```bash
 cd cafeteria-backend/cafeteria-backend && ./mvnw -q clean verify
 cd cafeteria-frontend/cafeteria-frontend && npm run build
-./scripts/smoke-test.sh http://localhost:8080
+./scripts/smoke-test.sh http://localhost:8080 <token-admin>   # incluye el pipeline de Kafka
 ```
 
 Compra de prueba por la API:
@@ -305,7 +426,7 @@ Colección de Postman: [`docs/postman`](docs/postman).
 
 ---
 
-## 9. Estructura del repositorio
+## 10. Estructura del repositorio
 
 ```
 cafeteria-backend/cafeteria-backend/   microservicios, BFF y cafeteria-common
@@ -313,14 +434,17 @@ cafeteria-frontend/cafeteria-frontend/ aplicación React
 infra/terraform/                       infraestructura de AWS
 rabbitmq/rabbitmq.conf                 formación del cluster
 scripts/                               smoke test y arranque del cluster por etapas
+ms-antifraude (en el backend)          topología de Kafka Streams: streams/AntifraudeTopology.java
 docs/                                  plan de la EP2 y colección de Postman
 docker-compose.yml                     stack completo
 ```
 
 ---
 
-## 10. Limitaciones conocidas
+## 11. Limitaciones conocidas
 
 - La pauta pide el frontend en Angular; este proyecto usa React + Vite, decisión heredada de la EP1.
 - La base `cafeteria` de MySQL de versiones anteriores queda sin uso; no se borra automáticamente.
 - El pago es una simulación con fines académicos.
+- Kafka corre con un solo broker: todos los topics tienen replication factor 1 (en producción serían 3
+  brokers, replication factor 3 y `min.insync.replicas=2`).

@@ -22,7 +22,7 @@ public class Alerta {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Pattern(regexp = "STOCK_BAJO|PEDIDO_LISTO|DLQ", message = "Tipo de alerta invalido")
+    @Pattern(regexp = "STOCK_BAJO|PEDIDO_LISTO|DLQ|FRAUDE", message = "Tipo de alerta invalido")
     private String tipo;
 
     @NotBlank(message = "El mensaje de la alerta no puede estar vacio")

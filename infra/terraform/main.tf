@@ -61,6 +61,14 @@ resource "aws_security_group" "backend" {
   }
 
   ingress {
+    description = "Kafka UI (Fase 8): solo desde mi IP. El broker (9092) NO se abre"
+    from_port   = 8095
+    to_port     = 8095
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+  ingress {
     description = "BFF: solo deberia llegarle trafico del API Gateway (OriginVerifyGlobalFilter rechaza el resto, ver bff-gateway)"
     from_port   = 8080
     to_port     = 8080
@@ -237,6 +245,7 @@ resource "aws_instance" "frontend" {
     azure_authority          = var.azure_authority
     api_gateway_url          = "${aws_apigatewayv2_api.app.api_endpoint}/api"
     rabbitmq_dashboard_url   = "http://${aws_eip.backend.public_ip}:15672"
+    kafka_ui_url             = "http://${aws_eip.backend.public_ip}:8095"
   })
 
   tags = {

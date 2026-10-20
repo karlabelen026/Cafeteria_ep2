@@ -42,6 +42,7 @@ const NAV_GROUPS = [
       { to: '/dashboard/proveedores', label: 'Proveedores', icon: '🚚', roles: ['ADMIN', 'GERENTE', 'BODEGUERO'] },
       { to: '/dashboard/reportes', label: 'Reportes', icon: '📈', roles: ['ADMIN', 'GERENTE', 'CAJERO'] },
       { to: '/dashboard/alertas', label: 'Alertas', icon: '🔔', roles: null },
+      { to: '/dashboard/antifraude', label: 'Antifraude (Kafka)', icon: '🛡️', roles: ['ADMIN'] },
     ],
   },
 ];

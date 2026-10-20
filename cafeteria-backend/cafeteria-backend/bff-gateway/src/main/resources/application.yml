@@ -54,6 +54,11 @@ spring:
           uri: ${MS_RABBITMQ_ADMIN_URL:http://localhost:8090}
           predicates:
             - Path=/api/rabbitmq/**
+        # Fase 8: monitoreo antifraude con Kafka Streams.
+        - id: ms-antifraude
+          uri: ${MS_ANTIFRAUDE_URL:http://localhost:8091}
+          predicates:
+            - Path=/api/antifraude/**
       # CORS se configura en CorsConfig.java, dentro de la cadena de Spring
       # Security (ver SecurityConfig / NoAuthSecurityConfig) en vez de aqui:
       # un "globalcors" separado no alcanza a agregar los headers cuando

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test de CafeGestion360 (ver docs/EP2_PLAN.md Fase 7 / sección 11).
 # Recorre con curl: productos públicos, checkout, seguimiento hasta PAGADO,
-# tarjeta 9999 hasta DLQ, y los endpoints del admin de RabbitMQ.
+# tarjeta 9999 hasta DLQ, los endpoints del admin de RabbitMQ y el pipeline
+# antifraude de Kafka (Fase 8).
 #
 # Uso:
 #   ./scripts/smoke-test.sh [BASE_URL] [ADMIN_TOKEN]
@@ -137,6 +138,48 @@ if [ -n "$ADMIN_TOKEN" ]; then
         -H "Authorization: Bearer $ADMIN_TOKEN"
 else
     echo "   (sin ADMIN_TOKEN: se omiten. Pasa un access token ADMIN como segundo argumento para incluirlas)"
+fi
+
+echo
+echo "-- 6) Kafka + Kafka Streams: monitoreo antifraude (requiere rol ADMIN) --"
+if [ -n "$ADMIN_TOKEN" ]; then
+    CLIENTE_KAFKA="smoke-$(date +%s)@mail.cl"
+    simular() {
+        chequear "$1" 202 -X POST "$BASE_URL/api/antifraude/simular" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d "$2"
+    }
+    simular "Simular 500 CLP (sin alerta) -> 202" "{\"clienteEmail\":\"$CLIENTE_KAFKA\",\"monto\":500,\"metodoPago\":\"DEBITO\"}"
+    simular "Simular 60000 CLP (alerta ALTA) -> 202" "{\"clienteEmail\":\"$CLIENTE_KAFKA\",\"monto\":60000,\"metodoPago\":\"CREDITO\"}"
+    simular "Simular 5 CLP (filtrada) -> 202" "{\"clienteEmail\":\"$CLIENTE_KAFKA\",\"monto\":5,\"metodoPago\":\"EFECTIVO\"}"
+    chequear "Simular con email invalido -> 400" 400 -X POST "$BASE_URL/api/antifraude/simular" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+        -d '{"clienteEmail":"no-es-email","monto":500,"metodoPago":"DEBITO"}'
+
+    echo "   Esperando a que Kafka Streams procese (8s)..."
+    sleep 8
+    chequear "GET /api/antifraude/totales/$CLIENTE_KAFKA -> 200" 200 \
+        "$BASE_URL/api/antifraude/totales/$CLIENTE_KAFKA" -H "Authorization: Bearer $ADMIN_TOKEN"
+    if cuerpo | grep -q '"totalClp":60500'; then
+        verde "OK   Total acumulado = 60500 CLP (los 5 CLP se filtraron)"
+        OK=$((OK + 1))
+    else
+        rojo "FAIL Total acumulado inesperado: $(cuerpo)"
+        FAIL=$((FAIL + 1))
+    fi
+    chequear "GET /api/antifraude/alertas -> 200" 200 \
+        "$BASE_URL/api/antifraude/alertas" -H "Authorization: Bearer $ADMIN_TOKEN"
+    if cuerpo | grep -q "\"cliente\":\"$CLIENTE_KAFKA\",\"severidad\":\"ALTA\""; then
+        verde "OK   Alerta ALTA de $CLIENTE_KAFKA recibida desde el topic alertas-fraude"
+        OK=$((OK + 1))
+    else
+        rojo "FAIL No llego la alerta ALTA de $CLIENTE_KAFKA"
+        FAIL=$((FAIL + 1))
+    fi
+    chequear "POST /api/antifraude/carga?cantidad=1000 -> 200" 200 -X POST \
+        "$BASE_URL/api/antifraude/carga?cantidad=1000" -H "Authorization: Bearer $ADMIN_TOKEN"
+    echo "   $(cuerpo)"
+else
+    echo "   (sin ADMIN_TOKEN: se omiten. Revisa a mano en Kafka UI: http://localhost:8095)"
 fi
 
 echo
