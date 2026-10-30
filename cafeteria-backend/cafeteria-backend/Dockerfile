@@ -25,6 +25,7 @@ COPY ms-reportes/pom.xml ms-reportes/pom.xml
 COPY ms-notificaciones/pom.xml ms-notificaciones/pom.xml
 COPY ms-rabbitmq-admin/pom.xml ms-rabbitmq-admin/pom.xml
 COPY ms-antifraude/pom.xml ms-antifraude/pom.xml
+COPY ms-kafka-admin/pom.xml ms-kafka-admin/pom.xml
 COPY bff-gateway/pom.xml bff-gateway/pom.xml
 RUN chmod +x mvnw && ./mvnw -q -B -pl ${MODULE} -am dependency:go-offline
 

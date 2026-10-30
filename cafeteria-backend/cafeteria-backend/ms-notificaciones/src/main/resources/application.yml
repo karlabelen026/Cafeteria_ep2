@@ -36,8 +36,15 @@ spring:
   # Kafka (Fase 8): consume alertas-fraude (las emite ms-antifraude).
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Un consumidor por particion dentro del grupo: Kafka reparte las 3
+    # particiones entre ellos (se ve en Kafka UI -> Consumers).
+    listener:
+      concurrency: 3
     consumer:
       auto-offset-reset: earliest
+      # alertas-fraude lo escribe Kafka Streams con transacciones (exactly_once_v2):
+      # sin esto se podrian leer alertas de una transaccion abortada.
+      isolation-level: read_committed
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # ErrorHandlingDeserializer envuelve al JsonDeserializer: un JSON
       # invalido no deja al consumidor en un bucle infinito, el registro se
@@ -105,7 +112,11 @@ app:
     # La DLT tiene las mismas particiones que el topic principal: el registro
     # fallido va a la misma particion de la que vino.
     particiones: 3
-    replicas: 1
+    # Cluster de 3 brokers: cada particion vive en los 3. Con acks=all, una
+    # escritura se confirma cuando esta en min-insync-replicas de ellas: se
+    # tolera la caida de 1 broker sin perder datos ni dejar de escribir.
+    replicas: 3
+    min-insync-replicas: 2
     retencion-ms:
       alertas-fraude-dlt: 1209600000   # 14 dias para revisar y reinyectar
     reintentos:

@@ -91,7 +91,10 @@ app:
     topics:
       transacciones: cafeteria.pagos.transacciones
     particiones: 3
-    # Un solo broker en Docker Compose / EC2: en produccion seria 3.
-    replicas: 1
+    # Cluster de 3 brokers: cada particion vive en los 3. Con acks=all, una
+    # escritura se confirma cuando esta en min-insync-replicas de ellas: se
+    # tolera la caida de 1 broker sin perder datos ni dejar de escribir.
+    replicas: 3
+    min-insync-replicas: 2
     retencion-ms:
       transacciones: 604800000   # 7 dias: permite replay del historial

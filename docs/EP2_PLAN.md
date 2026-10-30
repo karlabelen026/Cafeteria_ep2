@@ -824,13 +824,14 @@ se agrega en paralelo como plataforma de streaming (eventos retenidos, varios co
 
 | Servicio | Imagen | Notas |
 |---|---|---|
-| `zookeeper` | confluentinc/cp-zookeeper:7.5.0 | `mem_limit 384m`, heap 192 MB |
-| `kafka` | confluentinc/cp-kafka:7.5.0 | Listeners `PLAINTEXT://kafka:29092` y `PLAINTEXT_HOST://localhost:9092`; `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`; retención por defecto 168 h; `mem_limit 1g`, heap 512 MB; healthcheck con `kafka-broker-api-versions` |
+| `zookeeper-1/2/3` | confluentinc/cp-zookeeper:7.5.0 | Ensemble de 3 nodos (`ZOOKEEPER_SERVER_ID`, `ZOOKEEPER_SERVERS`); `mem_limit 256m`, heap 128 MB |
+| `kafka-1/2/3` | confluentinc/cp-kafka:7.5.0 | Listeners `PLAINTEXT://kafka-N:29092` y `PLAINTEXT_HOST://localhost:909X`; `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`; retención por defecto 168 h; `mem_limit 896m`, heap 384 MB; healthcheck con `kafka-broker-api-versions` |
 | `kafka-ui` | provectuslabs/kafka-ui | Publicada en el **8095** (el 8080 es del BFF); `mem_limit 512m` |
 | `ms-antifraude` | módulo nuevo | Puerto 8091, sin base de datos |
 
-Como Kafka Streams usa `exactly_once_v2` (transacciones) y hay un solo broker, también se fijan
-`KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1` y `KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1`.
+Los topics internos también se replican: `KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=3`,
+`KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=3` y `KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=2` (Kafka Streams usa
+transacciones por `exactly_once_v2`), más `KAFKA_DEFAULT_REPLICATION_FACTOR=3` y `KAFKA_MIN_INSYNC_REPLICAS=2`.
 
 ### Pipeline
 
@@ -855,15 +856,15 @@ ms-pagos (PasarelaPagoService)
 
 | Topic | Particiones | RF | Key | Retención | Productor | Consumidores |
 |---|---|---|---|---|---|---|
-| `cafeteria.pagos.transacciones` | 3 | 1 | email del cliente | 7 días | ms-pagos, simulador de ms-antifraude | Kafka Streams (`cafeteria-antifraude`) |
-| `cafeteria.antifraude.totales-por-cliente` | 3 | 1 | email del cliente | **compactado** | Kafka Streams | (consulta/replay) |
-| `alertas-fraude` | 3 | 1 | email del cliente | 30 días | Kafka Streams | `notificaciones-antifraude`, `antifraude-monitor` |
-| `alertas-fraude.DLT` | 3 | 1 | la del original | 14 días | DeadLetterPublishingRecoverer | grupo `notificaciones-dlt-reinyeccion` (solo al reinyectar) |
-| `cafeteria-antifraude-*-changelog` | 3 | 1 | — | (interno) | Kafka Streams | Kafka Streams (restaura los state stores) |
+| `cafeteria.pagos.transacciones` | 3 | 3 | email del cliente | 7 días | ms-pagos, simulador de ms-antifraude | Kafka Streams (`cafeteria-antifraude`) |
+| `cafeteria.antifraude.totales-por-cliente` | 3 | 3 | email del cliente | **compactado** | Kafka Streams | (consulta/replay) |
+| `alertas-fraude` | 3 | 3 | email del cliente | 30 días | Kafka Streams | `notificaciones-antifraude`, `antifraude-monitor` |
+| `alertas-fraude.DLT` | 3 | 3 | la del original | 14 días | DeadLetterPublishingRecoverer | grupo `notificaciones-dlt-reinyeccion` (solo al reinyectar) |
+| `cafeteria-antifraude-*-changelog` | 3 | 3 | — | (interno) | Kafka Streams | Kafka Streams (restaura los state stores) |
 
 Cada aplicación crea sus topics con beans `NewTopic` (`TopicBuilder`): ms-pagos y ms-antifraude el de
-transacciones, ms-antifraude los de totales y alertas, ms-notificaciones su DLT. RF 1 porque hay un solo
-broker; en producción serían 3 brokers con RF 3 y `min.insync.replicas=2`.
+transacciones, ms-antifraude los de totales y alertas, ms-notificaciones su DLT. Todos con 3 réplicas y
+`min.insync.replicas=2`; los de retención, con `cleanup.policy=delete` explícito.
 
 ### Configuración centralizada
 
@@ -917,6 +918,51 @@ el error: si Kafka no está disponible el pago se completa igual.
 
 ### AWS
 
-`user_data_backend.sh.tftpl` levanta también `zookeeper kafka kafka-ui ms-antifraude`. El Security Group
+`user_data_backend.sh.tftpl` levanta también `zookeeper-1/2/3`, `kafka-1/2/3`, `kafka-ui`, `ms-antifraude` y
+`ms-kafka-admin`. El Security Group
 abre el **8095** (Kafka UI) solo para `my_ip_cidr`; el 9092 no se abre. Output nuevo: `kafka_ui_url`. El
 frontend recibe `VITE_KAFKA_UI_URL`.
+
+---
+
+## Anexo EP3: cluster de Kafka y `ms-kafka-admin`
+
+Cierra las brechas respecto de la pauta del encargo EP3.
+
+### Cluster (3 Zookeeper + 3 brokers)
+
+```
+zookeeper-1 ─ zookeeper-2 ─ zookeeper-3      ensemble: tolera la caída de 1 nodo (quórum de 2)
+      │             │            │
+   kafka-1  ─── kafka-2  ─── kafka-3         cada partición: 1 líder + 2 seguidores
+```
+
+- `KAFKA_BOOTSTRAP_SERVERS` y Kafka UI apuntan a los 3 brokers.
+- `app.kafka.replicas: 3` y `app.kafka.min-insync-replicas: 2` en ms-pagos, ms-antifraude y ms-notificaciones.
+- Los microservicios que usan Kafka dependen de los 3 brokers `healthy`: crear un topic con RF 3 exige los 3.
+- **Memoria:** la EC2 se mantiene en t3.large porque el Learner Lab deniega tipos mayores; por eso cada broker
+  tiene heap de 384 MB y `mem_limit 896m`, y cada Zookeeper heap de 128 MB. El healthcheck del broker es otra JVM
+  dentro del contenedor, así que define su propio `KAFKA_HEAP_OPTS` para no sumar el heap del broker.
+
+### `ms-kafka-admin` (puerto 8092, sin base de datos)
+
+Controller sin lógica → `KafkaAdminService` → `AdminClient`. Ruteado en el BFF bajo `/api/kafka/**`, con JWT y rol
+ADMIN (`anyRequest().hasAuthority("ADMIN")`). Endpoints y reglas: ver README, sección 5.
+
+### Decisiones de diseño
+
+- **Topics protegidos:** eliminarlos o cambiar sus particiones rompería el flujo (la key decide la partición, y
+  Kafka Streams exige que el número no cambie), pero sí se puede ajustar su configuración, que es lo que se
+  quiere mostrar en la demo.
+- **`min.insync.replicas` por defecto = mín(2, réplicas):** con un topic de 1 réplica y un mínimo de 2, ningún
+  productor con `acks=all` podría escribir.
+- **`isolation.level=read_committed`** en los consumidores de `alertas-fraude`: Kafka Streams escribe con
+  transacciones y, sin esto, se podrían leer alertas de una transacción abortada. El marcador de cierre de cada
+  transacción ocupa un offset, por eso el lag puede quedar en 1 por partición sin nada pendiente.
+- **`AlertasFraudeListener`** registra y salta los mensajes que no puede procesar (`DefaultErrorHandler` sin DLT):
+  esa lista es solo una vista en memoria, y ms-notificaciones ya tiene DLT para el mismo topic.
+
+### Pruebas
+
+`KafkaAdminServiceImplTest` (reglas con AdminClient mockeado), `KafkaAdminControllerTest` (validación y permisos:
+401, 403, 400, 404, 409) y `KafkaAdminApplicationTests` (contexto sin broker).

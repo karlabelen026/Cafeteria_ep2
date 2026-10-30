@@ -23,12 +23,23 @@ spring:
         enable.idempotence: true
         linger.ms: 20
         max.block.ms: 3000
+        # Menor que la espera de SimuladorService (10 s): si la API responde
+        # 503, el mensaje ya no se va a entregar mas tarde.
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 8000
         spring.json.add.type.headers: false
+    # Un consumidor por particion dentro del grupo: Kafka reparte las 3
+    # particiones entre ellos (se ve en Kafka UI -> Consumers).
+    listener:
+      concurrency: 3
     # Consumidor propio de alertas-fraude (ultimas alertas para la vista).
     # ErrorHandlingDeserializer: un JSON invalido no deja al consumidor en un
     # bucle infinito de errores (guia 3.3.3).
     consumer:
       auto-offset-reset: earliest
+      # alertas-fraude lo escribe Kafka Streams con transacciones (exactly_once_v2):
+      # sin esto se podrian leer alertas de una transaccion abortada.
+      isolation-level: read_committed
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
@@ -50,8 +61,11 @@ spring:
         # (la regla de rafaga necesita ver cada conteo, no solo el ultimo).
         statestore.cache.max.bytes: 0
         commit.interval.ms: 1000
-        # Topics internos (changelog y repartition): un solo broker.
+        # Topics internos (changelog y repartition): igual que los demas.
         replication.factor: ${app.kafka.replicas}
+        # Un hilo por particion del topic de transacciones: se ve el balanceo
+        # de tareas dentro del grupo cafeteria-antifraude en Kafka UI.
+        num.stream.threads: 3
 
 server:
   port: 8091
@@ -77,8 +91,11 @@ app:
       # cada grupo recibe TODAS las alertas, ver docs/EP2_PLAN.md Fase 8).
       monitor: antifraude-monitor
     particiones: 3
-    # Un solo broker en Docker Compose / EC2: en produccion seria 3.
-    replicas: 1
+    # Cluster de 3 brokers: cada particion vive en los 3. Con acks=all, una
+    # escritura se confirma cuando esta en min-insync-replicas de ellas: se
+    # tolera la caida de 1 broker sin perder datos ni dejar de escribir.
+    replicas: 3
+    min-insync-replicas: 2
     retencion-ms:
       transacciones: 604800000   # 7 dias
       alertas-fraude: 2592000000 # 30 dias

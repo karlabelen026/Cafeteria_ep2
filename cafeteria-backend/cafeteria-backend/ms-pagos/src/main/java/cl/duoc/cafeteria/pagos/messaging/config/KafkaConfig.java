@@ -24,6 +24,8 @@ public class KafkaConfig {
         return TopicBuilder.name(props.getTopics().get("transacciones"))
                 .partitions(props.getParticiones())
                 .replicas(props.getReplicas())
+                .config(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_DELETE)
+                .config(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(props.getMinInsyncReplicas()))
                 .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(props.getRetencionMs().get("transacciones")))
                 .build();
     }

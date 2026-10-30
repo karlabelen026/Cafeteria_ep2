@@ -16,7 +16,8 @@ public class KafkaTopicsProperties {
 
     private Map<String, String> topics = new HashMap<>();
     private int particiones = 3;
-    private int replicas = 1;
+    private int replicas = 3;
+    private int minInsyncReplicas = 2;
     private Map<String, Long> retencionMs = new HashMap<>();
 
     public Map<String, String> getTopics() {
@@ -41,6 +42,14 @@ public class KafkaTopicsProperties {
 
     public void setReplicas(int replicas) {
         this.replicas = replicas;
+    }
+
+    public int getMinInsyncReplicas() {
+        return minInsyncReplicas;
+    }
+
+    public void setMinInsyncReplicas(int minInsyncReplicas) {
+        this.minInsyncReplicas = minInsyncReplicas;
     }
 
     public Map<String, Long> getRetencionMs() {

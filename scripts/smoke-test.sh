@@ -183,6 +183,34 @@ else
 fi
 
 echo
+echo "-- 7) ms-kafka-admin: topics y consumer groups (requiere rol ADMIN) --"
+if [ -n "$ADMIN_TOKEN" ]; then
+    K="$BASE_URL/api/kafka"
+    H_AUTH="Authorization: Bearer $ADMIN_TOKEN"
+    H_JSON="Content-Type: application/json"
+    chequear "GET /api/kafka/cluster -> 200" 200 "$K/cluster" -H "$H_AUTH"
+    if [ "$(cuerpo | grep -o '"id":' | wc -l)" -eq 3 ]; then
+        verde "OK   El cluster tiene 3 brokers"
+        OK=$((OK + 1))
+    else
+        rojo "FAIL El cluster no tiene 3 brokers: $(cuerpo)"
+        FAIL=$((FAIL + 1))
+    fi
+    chequear "POST topic con nombre vacio -> 400" 400 -X POST "$K/topics" -H "$H_AUTH" -H "$H_JSON" -d '{"name":""}'
+    chequear "POST smoke.kafka.topic -> 201" 201 -X POST "$K/topics" -H "$H_AUTH" -H "$H_JSON" -d '{"name":"smoke.kafka.topic"}'
+    chequear "PUT config retention.ms -> 200" 200 -X PUT "$K/topics/smoke.kafka.topic/config" -H "$H_AUTH" -H "$H_JSON" \
+        -d '{"configs":{"retention.ms":"86400000"}}'
+    chequear "POST aumentar a 6 particiones -> 200" 200 -X POST "$K/topics/smoke.kafka.topic/partitions" -H "$H_AUTH" -H "$H_JSON" \
+        -d '{"total":6}'
+    chequear "DELETE smoke.kafka.topic -> 204" 204 -X DELETE "$K/topics/smoke.kafka.topic" -H "$H_AUTH"
+    chequear "DELETE alertas-fraude (protegido) -> 409" 409 -X DELETE "$K/topics/alertas-fraude" -H "$H_AUTH"
+    chequear "GET /api/kafka/consumer-groups -> 200" 200 "$K/consumer-groups" -H "$H_AUTH"
+    chequear "GET grupo notificaciones-antifraude -> 200" 200 "$K/consumer-groups/notificaciones-antifraude" -H "$H_AUTH"
+else
+    echo "   (sin ADMIN_TOKEN: se omiten)"
+fi
+
+echo
 echo "== Resultado: $OK OK, $FAIL FAIL =="
 rm -f /tmp/smoke-test-body.json
 [ "$FAIL" -eq 0 ]

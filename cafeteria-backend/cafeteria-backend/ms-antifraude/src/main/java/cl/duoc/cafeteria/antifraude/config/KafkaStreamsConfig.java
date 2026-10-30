@@ -20,8 +20,9 @@ import org.springframework.kafka.config.TopicBuilder;
  *   cafeteria.antifraude.totales-por-cliente (compactado, key = cliente)
  *   alertas-fraude (key = cliente) --> ms-notificaciones y el monitor propio
  *
- * 3 particiones por topic (hasta 3 consumidores en paralelo por grupo) y
- * replication factor 1 porque hay un solo broker; en produccion seria 3.
+ * 3 particiones por topic (hasta 3 consumidores en paralelo por grupo), 3
+ * replicas (una en cada broker) y min.insync.replicas=2: con acks=all se
+ * tolera la caida de un broker sin perder datos ni dejar de escribir.
  */
 @Configuration
 @EnableKafkaStreams
@@ -33,6 +34,8 @@ public class KafkaStreamsConfig {
         return TopicBuilder.name(props.topic("transacciones"))
                 .partitions(props.getParticiones())
                 .replicas(props.getReplicas())
+                .config(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_DELETE)
+                .config(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(props.getMinInsyncReplicas()))
                 .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(props.getRetencionMs().get("transacciones")))
                 .build();
     }
@@ -46,6 +49,7 @@ public class KafkaStreamsConfig {
         return TopicBuilder.name(props.topic("totales"))
                 .partitions(props.getParticiones())
                 .replicas(props.getReplicas())
+                .config(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(props.getMinInsyncReplicas()))
                 .compact()
                 .build();
     }
@@ -55,6 +59,8 @@ public class KafkaStreamsConfig {
         return TopicBuilder.name(props.topic("alertas-fraude"))
                 .partitions(props.getParticiones())
                 .replicas(props.getReplicas())
+                .config(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_DELETE)
+                .config(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(props.getMinInsyncReplicas()))
                 .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(props.getRetencionMs().get("alertas-fraude")))
                 .build();
     }

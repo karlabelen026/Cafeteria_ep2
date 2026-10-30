@@ -10,7 +10,7 @@ y ACK manual) sobre un **cluster de 3 nodos**, y cada pago se publica además en
 - **Frontend:** React 18 + Vite, servido con nginx — `cafeteria-frontend/cafeteria-frontend`
 - **Seguridad:** Azure Entra ID (MSAL en el frontend, validación de JWT en el BFF y en cada microservicio)
 - **Datos:** MySQL 8.4, una base por microservicio
-- **Mensajería:** RabbitMQ 3.13 (cluster de 3 nodos) y Apache Kafka 7.5 (Confluent, 1 broker + Zookeeper)
+- **Mensajería:** RabbitMQ 3.13 (cluster de 3 nodos) y Apache Kafka 7.5 (Confluent, cluster de 3 brokers + 3 Zookeeper)
 - **Infraestructura:** Docker Compose en local; Terraform + GitHub Actions para AWS (2 EC2 + API Gateway)
 
 ---
@@ -41,11 +41,12 @@ Navegador ──> Frontend (nginx)
 | `ms-notificaciones` | 8089 | Boletas, alertas y chat del equipo |
 | `ms-rabbitmq-admin` | 8090 | Administración de RabbitMQ (colas, exchanges, bindings, DLQ) |
 | `ms-antifraude` | 8091 | Monitoreo antifraude de pagos con Kafka Streams |
+| `ms-kafka-admin` | 8092 | Administración de Kafka (topics, configuración, consumer groups) |
 | `frontend` | 4200 | Tienda pública y portal del equipo |
 | `mysql` | 3306 | Base de datos |
 | `rabbitmq-1 / 2 / 3` | 15672 / 15673 / 15674 | Panel de administración de cada nodo (AMQP 5672 solo en el nodo 1) |
-| `kafka` | 9092 | Broker de Kafka (`kafka:29092` dentro de Docker; 9092 solo para tu máquina) |
-| `zookeeper` | — | Coordinación del broker de Kafka (sin puerto publicado) |
+| `kafka-1 / 2 / 3` | 9092 / 9093 / 9094 | Brokers de Kafka (`kafka-N:29092` dentro de Docker; los puertos publicados son solo para tu máquina) |
+| `zookeeper-1 / 2 / 3` | — | Ensemble que coordina el cluster de Kafka (sin puertos publicados) |
 | `kafka-ui` | 8095 | Interfaz web de Kafka: topics, mensajes, consumer groups y lag |
 
 `cafeteria-common` es una librería compartida con los eventos de dominio y el manejo de ACK.
@@ -105,7 +106,7 @@ El rol lo entrega el backend (`GET /api/me`, leído del JWT ya validado); el fro
 | Reportes | sí | sí | — | sí | — |
 | Alertas y chat del equipo | sí | sí | sí | sí | sí |
 | Mensajería y panel de RabbitMQ | sí | — | — | — | — |
-| Antifraude (Kafka) | sí | — | — | — | — |
+| Antifraude y administración de Kafka | sí | — | — | — | — |
 
 Eliminar es exclusivo de ADMIN en todos los módulos. Todas las vistas se refrescan solas cada 8 segundos,
 así que lo que un rol crea o modifica lo ven los demás sin recargar.
@@ -279,15 +280,21 @@ paralelo; si el broker de Kafka no está disponible, el pago igual se completa y
 - **Consumer groups:** `alertas-fraude` lo leen dos grupos independientes (`notificaciones-antifraude` y
   `antifraude-monitor`), y ambos reciben todas las alertas. Kafka Streams usa su `application-id`
   (`cafeteria-antifraude`) como grupo.
+- **Balanceo:** cada grupo tiene 3 consumidores (`spring.kafka.listener.concurrency: 3` y
+  `num.stream.threads: 3`), y Kafka reparte entre ellos las 3 particiones. Se ve en Kafka UI → **Consumers**
+  o en `GET /api/kafka/consumer-groups/{id}`.
 - **Consumer lag:** cuántos mensajes le faltan a un grupo para ponerse al día. Se ve en Kafka UI →
   **Consumers** → elige el grupo → columna **Lag** por partición. Después de una prueba de carga el lag
-  sube y baja a 0 en segundos.
+  sube y baja en segundos. En `alertas-fraude` puede quedar en 1 por partición aunque no haya nada pendiente:
+  Kafka Streams escribe con transacciones (`exactly_once_v2`) y el marcador de cierre ocupa un offset.
 - **Replicación y acks:** los productores usan `acks=all` e `enable.idempotence=true` (sin duplicados
-  aunque reintenten), más `linger.ms=20`, `batch.size=32768` y compresión `snappy`. Con un solo broker el
-  replication factor es 1.
+  aunque reintenten), más `linger.ms=20`, `batch.size=32768` y compresión `snappy`. Cada partición tiene 3
+  réplicas (una por broker) y `min.insync.replicas=2`: si cae un broker el cluster sigue escribiendo sin
+  perder datos; si caen dos, rechaza las escrituras en vez de arriesgarlas.
 - **Exactly-once:** Kafka Streams corre con `processing.guarantee=exactly_once_v2`.
-- **Retención y compactación:** transacciones 7 días, alertas 30 días, DLT 14 días. El topic de totales es
-  **compactado**: Kafka guarda solo el último total de cada cliente.
+- **Retención y compactación:** transacciones 7 días, alertas 30 días, DLT 14 días, con
+  `cleanup.policy=delete`. El topic de totales es **compactado** (`cleanup.policy=compact`): Kafka guarda solo
+  el último total de cada cliente.
 - **Interactive Queries:** `GET /api/antifraude/totales` lee el state store de Kafka Streams directamente,
   sin base de datos.
 
@@ -314,6 +321,57 @@ En `ms-notificaciones`, el consumidor de `alertas-fraude`:
 
 La prueba de carga usa montos normales (todas aprobadas y bajo el umbral) para no inundar las alertas:
 solo puede disparar la regla de ráfaga, una vez por cliente.
+
+### Microservicio administrador de Kafka (`/api/kafka/**`, solo ADMIN)
+
+`ms-kafka-admin` es el equivalente de `ms-rabbitmq-admin`: expone una API REST sobre `AdminClient`, encapsulada
+en `KafkaAdminService`. Documentación interactiva en http://localhost:8092/swagger-ui.html
+
+| Verbo | Ruta | Qué hace | API de Kafka |
+|---|---|---|---|
+| GET | `/topics`, `/topics/{name}` | Lista topics; el detalle trae líder, réplicas e ISR por partición, y su configuración | `listTopics`, `describeTopics`, `describeConfigs` |
+| POST | `/topics` | Crea un topic. Por defecto: 3 particiones, 3 réplicas, `min.insync.replicas=2`, `cleanup.policy=delete` | `createTopics` |
+| PUT | `/topics/{name}/config` | Cambia su configuración, p.ej. `retention.ms` | `incrementalAlterConfigs` |
+| POST | `/topics/{name}/partitions` | Aumenta el total de particiones | `createPartitions` |
+| DELETE | `/topics/{name}` | Elimina un topic | `deleteTopics` |
+| GET | `/consumer-groups`, `/consumer-groups/{id}` | Lista grupos; el detalle trae miembros, particiones asignadas, offsets y lag | `listConsumerGroups`, `describeConsumerGroups`, `listConsumerGroupOffsets`, `listOffsets` |
+| DELETE | `/consumer-groups/{id}` | Elimina un grupo sin consumidores activos (409 si está activo) | `deleteConsumerGroups` |
+| GET | `/cluster` | Brokers y cuál es el controlador | `describeCluster` |
+
+Reglas (bloque `app.kafka-admin` del `application.yml`):
+
+- Los 4 topics del sistema no se pueden eliminar ni cambiar sus particiones (409); su configuración sí se
+  puede ajustar.
+- Los topics internos (`__*` y los de Kafka Streams) no se pueden modificar.
+- El nombre, las particiones, las réplicas (máximo 3, los brokers que hay) y la política de limpieza se validan
+  con Bean Validation (400 con el campo que falló). Solo se pueden cambiar las configuraciones de
+  `configs-permitidas`.
+- Si Kafka no responde a tiempo, la API contesta 503.
+
+```bash
+K=http://localhost:8080/api/kafka; AUTH="Authorization: Bearer $TOKEN"; JSON="Content-Type: application/json"
+curl -H "$AUTH" $K/cluster
+curl -H "$AUTH" -H "$JSON" -X POST $K/topics -d '{"name":"demo.pedidos"}'                        # 201
+curl -H "$AUTH" $K/topics/demo.pedidos                                                           # 3 réplicas por partición
+curl -H "$AUTH" -H "$JSON" -X PUT $K/topics/demo.pedidos/config -d '{"configs":{"retention.ms":"86400000"}}'
+curl -H "$AUTH" -H "$JSON" -X POST $K/topics/demo.pedidos/partitions -d '{"total":6}'
+curl -H "$AUTH" $K/consumer-groups/notificaciones-antifraude                                     # miembros, offsets y lag
+curl -H "$AUTH" -X DELETE $K/topics/demo.pedidos                                                 # 204
+curl -H "$AUTH" -X DELETE $K/topics/alertas-fraude                                               # 409, protegido
+```
+
+Lo mismo por línea de comandos: `./scripts/kafka-topics.sh` (`listar`, `describir`, `crear`, `config`,
+`particiones`, `eliminar`, `grupos`, `grupo`).
+
+### Demostrar la tolerancia a fallos
+
+| Prueba | Resultado |
+|---|---|
+| `docker stop kafka-2` | Los líderes pasan a otros brokers y el ISR baja a 2. Pagos, alertas y simulador siguen funcionando |
+| `docker stop kafka-3` (ya sin `kafka-2`) | Queda 1 réplica, menos que `min.insync.replicas=2`: `/simular` responde 503 y Kafka rechaza la escritura. Los pagos se completan igual y ms-pagos registra el error |
+| `docker start kafka-2 kafka-3` | Los brokers se ponen al día, el ISR vuelve a 3 y el flujo continúa sin reiniciar nada |
+
+Compruébalo con `GET /api/kafka/topics/alertas-fraude` o `./scripts/kafka-topics.sh describir alertas-fraude`.
 
 ### Cómo probarlo
 
@@ -446,5 +504,5 @@ docker-compose.yml                     stack completo
 - La pauta pide el frontend en Angular; este proyecto usa React + Vite, decisión heredada de la EP1.
 - La base `cafeteria` de MySQL de versiones anteriores queda sin uso; no se borra automáticamente.
 - El pago es una simulación con fines académicos.
-- Kafka corre con un solo broker: todos los topics tienen replication factor 1 (en producción serían 3
-  brokers, replication factor 3 y `min.insync.replicas=2`).
+- Los 3 brokers y los 3 Zookeeper corren en la misma EC2: replican los datos y toleran la caída de un
+  contenedor, pero no la de la máquina. En producción irían en máquinas y zonas de disponibilidad distintas.

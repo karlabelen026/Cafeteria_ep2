@@ -35,8 +35,65 @@ x-backend-common: &backend-common
     # Secreto compartido para llamadas servicio-a-servicio (ver ms-pedidos
     # InternalTokenFilter y los PedidoClient). Cambialo en tu .env al desplegar.
     INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-cafeteria-interno-local}
-    # Kafka (Fase 8): listener interno de la red de Docker.
-    KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    # Kafka: listener interno de los 3 brokers (basta con que uno responda
+    # para descubrir el resto del cluster).
+    KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+
+# Comun a los 3 nodos de Zookeeper (ensemble) y a los 3 brokers de Kafka.
+x-zookeeper-common: &zookeeper-common
+  image: confluentinc/cp-zookeeper:7.5.0
+  restart: unless-stopped
+  mem_limit: 256m
+
+x-zookeeper-env: &zookeeper-env
+  ZOOKEEPER_CLIENT_PORT: 2181
+  ZOOKEEPER_TICK_TIME: 2000
+  ZOOKEEPER_INIT_LIMIT: 10
+  ZOOKEEPER_SYNC_LIMIT: 5
+  ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+  KAFKA_HEAP_OPTS: "-Xms48m -Xmx128m"
+
+x-kafka-common: &kafka-common
+  image: confluentinc/cp-kafka:7.5.0
+  restart: unless-stopped
+  # La EC2 es t3.large (el Learner Lab no permite tipos mayores): heap acotado
+  # para que los 3 brokers entren junto a las demas JVM.
+  mem_limit: 896m
+  depends_on:
+    - zookeeper-1
+    - zookeeper-2
+    - zookeeper-3
+  healthcheck:
+    # Con heap propio: la herramienta es otra JVM dentro del mismo contenedor
+    # y, sin esto, heredaria el heap del broker y podria pasarse del mem_limit.
+    test: ["CMD-SHELL", "KAFKA_HEAP_OPTS=-Xmx64m kafka-broker-api-versions --bootstrap-server localhost:29092 > /dev/null"]
+    interval: 30s
+    timeout: 25s
+    retries: 30
+    start_period: 60s
+
+x-kafka-env: &kafka-env
+  KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+  KAFKA_ZOOKEEPER_CONNECTION_TIMEOUT_MS: 60000
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+  KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  # Topics internos de Kafka con 3 replicas, igual que los de la aplicacion.
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  # exactly_once_v2 de Kafka Streams usa transacciones: su log tambien replicado.
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  # Con acks=all, una escritura se confirma cuando esta en al menos 2 replicas:
+  # el cluster sigue escribiendo aunque se caiga 1 broker, sin perder datos.
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  # Los topics los crea cada aplicacion (beans NewTopic) o ms-kafka-admin, nunca
+  # el broker al vuelo: asi particiones y retencion quedan bajo control.
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  # Retencion por defecto del broker (guia 3.3.2); cada topic fija la suya.
+  KAFKA_LOG_RETENTION_HOURS: 168
+  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+  KAFKA_HEAP_OPTS: "-Xms192m -Xmx384m"
 
 services:
   mysql:
@@ -188,68 +245,97 @@ services:
       rabbitmq-1:
         condition: service_healthy
 
-  # ── Kafka (Fase 8): streaming de eventos, en paralelo a RabbitMQ ──────────
+  # ── Kafka: streaming de eventos, en paralelo a RabbitMQ ───────────────────
   # RabbitMQ sigue moviendo los comandos/tareas del negocio; Kafka retiene el
   # stream de transacciones de pago para analizarlo con Kafka Streams
-  # (ms-antifraude), con varios consumidores y replay (ver docs/EP2_PLAN.md
-  # Fase 8). Un solo broker: replication factor 1 en todos los topics.
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: zookeeper
-    restart: unless-stopped
-    mem_limit: 384m
+  # (ms-antifraude), con varios consumidores y replay (ver docs/EP2_PLAN.md).
+  # Cluster de 3 brokers coordinados por un ensemble de 3 Zookeeper: los topics
+  # usan 3 particiones, 3 replicas y min.insync.replicas=2.
+  zookeeper-1:
+    <<: *zookeeper-common
+    container_name: zookeeper-1
+    hostname: zookeeper-1
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      KAFKA_HEAP_OPTS: "-Xms64m -Xmx192m"
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 1
     volumes:
-      - zookeeper_data:/var/lib/zookeeper/data
-      - zookeeper_log:/var/lib/zookeeper/log
+      - zookeeper_1_data:/var/lib/zookeeper/data
+      - zookeeper_1_log:/var/lib/zookeeper/log
 
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: kafka
-    hostname: kafka
-    restart: unless-stopped
-    mem_limit: 1g
-    depends_on:
-      - zookeeper
+  zookeeper-2:
+    <<: *zookeeper-common
+    container_name: zookeeper-2
+    hostname: zookeeper-2
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 2
+    volumes:
+      - zookeeper_2_data:/var/lib/zookeeper/data
+      - zookeeper_2_log:/var/lib/zookeeper/log
+
+  zookeeper-3:
+    <<: *zookeeper-common
+    container_name: zookeeper-3
+    hostname: zookeeper-3
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 3
+    volumes:
+      - zookeeper_3_data:/var/lib/zookeeper/data
+      - zookeeper_3_log:/var/lib/zookeeper/log
+
+  kafka-1:
+    <<: *kafka-common
+    container_name: kafka-1
+    hostname: kafka-1
     ports:
-      # Solo para herramientas en tu maquina (localhost:9092). En la EC2 el
-      # Security Group NO abre este puerto: Kafka no queda expuesto a internet.
+      # Solo para herramientas en tu maquina. En la EC2 el Security Group NO
+      # abre este puerto: Kafka no queda expuesto a internet.
       - "9092:9092"
     environment:
+      <<: *kafka-env
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      # Dos listeners: kafka:29092 para los contenedores y localhost:9092
-      # para el host.
+      # kafka-1:29092 para los contenedores y localhost:9092 para el host.
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      # exactly_once_v2 de Kafka Streams usa transacciones: con un solo
-      # broker, el log de transacciones tambien va con 1 replica.
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      # Los topics los crea cada aplicacion (beans NewTopic), nunca el broker
-      # al vuelo: asi particiones y retencion quedan versionadas en el codigo.
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-      # Retencion por defecto del broker (guia 3.3.2); cada topic fija la suya.
-      KAFKA_LOG_RETENTION_HOURS: 168
-      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
-      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
     volumes:
-      - kafka_data:/var/lib/kafka/data
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 10s
-      timeout: 10s
-      retries: 30
-      start_period: 30s
+      - kafka_1_data:/var/lib/kafka/data
 
-  # Interfaz web de Kafka: topics, mensajes, consumer groups y su lag.
+  kafka-2:
+    <<: *kafka-common
+    container_name: kafka-2
+    hostname: kafka-2
+    ports:
+      # Solo para herramientas en tu maquina. En la EC2 el Security Group NO
+      # abre este puerto: Kafka no queda expuesto a internet.
+      - "9093:9093"
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 2
+      # kafka-2:29092 para los contenedores y localhost:9093 para el host.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:9093
+    volumes:
+      - kafka_2_data:/var/lib/kafka/data
+
+  kafka-3:
+    <<: *kafka-common
+    container_name: kafka-3
+    hostname: kafka-3
+    ports:
+      # Solo para herramientas en tu maquina. En la EC2 el Security Group NO
+      # abre este puerto: Kafka no queda expuesto a internet.
+      - "9094:9094"
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 3
+      # kafka-3:29092 para los contenedores y localhost:9094 para el host.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:9094
+    volumes:
+      - kafka_3_data:/var/lib/kafka/data
+
+  # Interfaz web de Kafka: topics, particiones/replicas, consumer groups y lag.
   # Publicada en el 8095 porque el 8080 lo usa bff-gateway.
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -260,10 +346,14 @@ services:
       - "8095:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: cafeteria
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
       JAVA_OPTS: "-Xms64m -Xmx256m"
     depends_on:
-      kafka:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
         condition: service_healthy
 
   ms-productos:
@@ -386,7 +476,11 @@ services:
         condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
-      kafka:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8085/actuator/health"]
@@ -483,7 +577,11 @@ services:
         condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
-      kafka:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8089/actuator/health"]
@@ -536,10 +634,39 @@ services:
     ports:
       - "8091:8091"
     depends_on:
-      kafka:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8091/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # Administrador de Kafka (equivalente a ms-rabbitmq-admin): topics, su
+  # configuracion y consumer groups, via AdminClient. Sin base de datos.
+  ms-kafka-admin:
+    <<: *backend-common
+    build:
+      context: ./cafeteria-backend/cafeteria-backend
+      args:
+        MODULE: ms-kafka-admin
+    container_name: ms-kafka-admin
+    ports:
+      - "8092:8092"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8092/actuator/health"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -577,6 +704,7 @@ services:
       MS_NOTIFICACIONES_URL: http://ms-notificaciones:8089
       MS_RABBITMQ_ADMIN_URL: http://ms-rabbitmq-admin:8090
       MS_ANTIFRAUDE_URL: http://ms-antifraude:8091
+      MS_KAFKA_ADMIN_URL: http://ms-kafka-admin:8092
     depends_on:
       ms-productos:
         condition: service_healthy
@@ -593,6 +721,8 @@ services:
       ms-rabbitmq-admin:
         condition: service_healthy
       ms-antifraude:
+        condition: service_healthy
+      ms-kafka-admin:
         condition: service_healthy
       ms-proveedores:
         condition: service_healthy
@@ -629,9 +759,15 @@ volumes:
   rabbitmq_1_data:
   rabbitmq_2_data:
   rabbitmq_3_data:
-  zookeeper_data:
-  zookeeper_log:
-  kafka_data:
+  zookeeper_1_data:
+  zookeeper_1_log:
+  zookeeper_2_data:
+  zookeeper_2_log:
+  zookeeper_3_data:
+  zookeeper_3_log:
+  kafka_1_data:
+  kafka_2_data:
+  kafka_3_data:
   ms_productos_data:
   ms_inventario_data:
   ms_pedidos_data:

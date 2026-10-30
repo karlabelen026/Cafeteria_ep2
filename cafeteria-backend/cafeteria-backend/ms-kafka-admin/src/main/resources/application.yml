@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: ms-kafka-admin
+  # NOTA: issuer-uri / audiences / jwk-set-uri NO se configuran aqui: igual que
+  # en los demas microservicios, SecurityConfig.java arma su propio JwtDecoder
+  # leyendo AZURE_ISSUER_URI / AZURE_JWK_SET_URI / AZURE_AUDIENCES.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+server:
+  port: 8092
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  security:
+    enabled: true
+  kafka-admin:
+    timeout-segundos: 15
+    # Valores por defecto al crear un topic si la peticion no los indica.
+    particiones-por-defecto: 3
+    replicas-por-defecto: 3
+    # Topics del sistema: no se pueden eliminar ni cambiar sus particiones (la
+    # key de cada mensaje decide su particion, y Kafka Streams exige que no
+    # cambien). Si se puede ajustar su configuracion, p.ej. la retencion.
+    protegidos:
+      - cafeteria.pagos.transacciones
+      - cafeteria.antifraude.totales-por-cliente
+      - alertas-fraude
+      - alertas-fraude.DLT
+    # Topics internos de Kafka y de Kafka Streams: no se pueden modificar.
+    prefijos-internos:
+      - __
+      - cafeteria-antifraude-
+    # Unicas configuraciones que se pueden cambiar con PUT /topics/{name}/config.
+    configs-permitidas:
+      - retention.ms
+      - retention.bytes
+      - cleanup.policy
+      - min.insync.replicas
+      - segment.ms
+      - max.message.bytes

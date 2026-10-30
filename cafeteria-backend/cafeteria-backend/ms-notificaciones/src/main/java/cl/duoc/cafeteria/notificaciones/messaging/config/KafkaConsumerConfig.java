@@ -48,6 +48,8 @@ public class KafkaConsumerConfig {
         return TopicBuilder.name(props.topic("alertas-fraude-dlt"))
                 .partitions(props.getParticiones())
                 .replicas(props.getReplicas())
+                .config(TopicConfig.CLEANUP_POLICY_CONFIG, TopicConfig.CLEANUP_POLICY_DELETE)
+                .config(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, String.valueOf(props.getMinInsyncReplicas()))
                 .config(TopicConfig.RETENTION_MS_CONFIG,
                         String.valueOf(props.getRetencionMs().get("alertas-fraude-dlt")))
                 .build();

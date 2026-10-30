@@ -34,6 +34,7 @@
         <module>ms-notificaciones</module>
         <module>ms-rabbitmq-admin</module>
         <module>ms-antifraude</module>
+        <module>ms-kafka-admin</module>
         <module>bff-gateway</module>
     </modules>
 

@@ -59,6 +59,11 @@ spring:
           uri: ${MS_ANTIFRAUDE_URL:http://localhost:8091}
           predicates:
             - Path=/api/antifraude/**
+        # Administrador de Kafka: topics, configuracion y consumer groups.
+        - id: ms-kafka-admin
+          uri: ${MS_KAFKA_ADMIN_URL:http://localhost:8092}
+          predicates:
+            - Path=/api/kafka/**
       # CORS se configura en CorsConfig.java, dentro de la cadena de Spring
       # Security (ver SecurityConfig / NoAuthSecurityConfig) en vez de aqui:
       # un "globalcors" separado no alcanza a agregar los headers cuando
