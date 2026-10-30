@@ -189,7 +189,10 @@ services:
       - rabbitmq_1_data:/var/lib/rabbitmq
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Espera a que RabbitMQ cree su cookie: el healthcheck corre como root y,
+      # si se adelanta en un volumen nuevo, la crea sin permisos para el broker,
+      # que entonces cae con "eacces" al arrancar (pasa con la CPU ocupada).
+      test: ["CMD-SHELL", "[ -f /var/lib/rabbitmq/.erlang.cookie ] && rabbitmq-diagnostics -q ping"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -211,7 +214,10 @@ services:
       - rabbitmq_2_data:/var/lib/rabbitmq
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Espera a que RabbitMQ cree su cookie: el healthcheck corre como root y,
+      # si se adelanta en un volumen nuevo, la crea sin permisos para el broker,
+      # que entonces cae con "eacces" al arrancar (pasa con la CPU ocupada).
+      test: ["CMD-SHELL", "[ -f /var/lib/rabbitmq/.erlang.cookie ] && rabbitmq-diagnostics -q ping"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -236,7 +242,10 @@ services:
       - rabbitmq_3_data:/var/lib/rabbitmq
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Espera a que RabbitMQ cree su cookie: el healthcheck corre como root y,
+      # si se adelanta en un volumen nuevo, la crea sin permisos para el broker,
+      # que entonces cae con "eacces" al arrancar (pasa con la CPU ocupada).
+      test: ["CMD-SHELL", "[ -f /var/lib/rabbitmq/.erlang.cookie ] && rabbitmq-diagnostics -q ping"]
       interval: 10s
       timeout: 5s
       retries: 30

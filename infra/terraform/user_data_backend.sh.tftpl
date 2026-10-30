@@ -120,6 +120,9 @@ RemainAfterExit=yes
 WorkingDirectory=$APP_DIR
 ExecStart=/usr/bin/docker compose up -d --build mysql rabbitmq-1 rabbitmq-2 rabbitmq-3 ms-productos ms-inventario ms-pedidos ms-clientes ms-pagos ms-empleados ms-proveedores ms-reportes ms-notificaciones ms-rabbitmq-admin zookeeper-1 zookeeper-2 zookeeper-3 kafka-1 kafka-2 kafka-3 kafka-ui ms-antifraude ms-kafka-admin bff-gateway
 ExecStop=/usr/bin/docker compose down
+# Si un servicio falla al arrancar, compose aborta sin crear los que faltan: reintenta.
+Restart=on-failure
+RestartSec=30
 TimeoutStartSec=0
 
 [Install]
