@@ -6,6 +6,7 @@ import { useToasts } from '../../context/ToastContext.jsx';
 import Modal from '../../components/Modal.jsx';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
 import CrudForm from '../../components/CrudForm.jsx';
+import MensajeriaEnVivo, { REFRESCO_EN_VIVO_MS } from '../../components/MensajeriaEnVivo.jsx';
 
 const CAMPOS_COLA = [
   { name: 'name', label: 'Nombre', type: 'text', required: true, placeholder: 'mi-cola-demo' },
@@ -25,8 +26,9 @@ const CAMPOS_EXCHANGE = [
   },
 ];
 
-// Administracion de RabbitMQ (ver docs/EP2_PLAN.md seccion 3.8 y 6.2): crear
-// y eliminar colas, exchanges y bindings usando ms-rabbitmq-admin (solo
+// Estado en vivo de RabbitMQ y Kafka (MensajeriaEnVivo) y administracion de
+// RabbitMQ (ver docs/EP2_PLAN.md seccion 3.8 y 6.2): crear y eliminar colas,
+// exchanges y bindings usando ms-rabbitmq-admin (solo
 // ADMIN). Los 4 exchanges y las 16 colas del sistema estan protegidos: el
 // backend responde 409 si se intenta eliminarlos/purgarlos.
 export default function Mensajeria() {
@@ -70,7 +72,7 @@ export default function Mensajeria() {
       .finally(() => setCargando(false));
   }
 
-  usePolling(cargar);
+  usePolling(cargar, REFRESCO_EN_VIVO_MS);
 
   async function crearCola() {
     setGuardando(true);
@@ -176,7 +178,7 @@ export default function Mensajeria() {
       <div className="dash-page__header">
         <div>
           <h2>Mensajería</h2>
-          <p>Crear y eliminar colas, exchanges y bindings de RabbitMQ (ms-rabbitmq-admin).</p>
+          <p>Nodos y movimiento de mensajes en vivo. Más abajo, la administración de colas, exchanges y bindings.</p>
         </div>
         <a className="dash-btn" href={rabbitDashboardUrl} target="_blank" rel="noopener noreferrer">
           Abrir dashboard de RabbitMQ ↗
@@ -184,6 +186,8 @@ export default function Mensajeria() {
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      <MensajeriaEnVivo colas={colas} />
 
       <div className="dash-card" style={{ marginBottom: 16 }}>
         <div className="dash-card__header">
@@ -197,9 +201,12 @@ export default function Mensajeria() {
             <thead>
               <tr>
                 <th>Nombre</th>
-                <th>Listos</th>
-                <th>No confirmados</th>
+                <th>Publicados</th>
+                <th>Entregados</th>
+                <th>Confirmados</th>
+                <th>En cola ahora</th>
                 <th>Consumidores</th>
+                <th>Nodo líder</th>
                 <th></th>
               </tr>
             </thead>
@@ -207,9 +214,12 @@ export default function Mensajeria() {
               {colas.map((c) => (
                 <tr key={c.name}>
                   <td>{c.name}</td>
-                  <td>{c.messagesReady}</td>
-                  <td>{c.messagesUnacknowledged}</td>
+                  <td key={`p-${c.actividad.publicados}`} className="dash-pulso">{c.actividad.publicados}</td>
+                  <td key={`e-${c.actividad.entregados}`} className="dash-pulso">{c.actividad.entregados}</td>
+                  <td key={`c-${c.actividad.confirmados}`} className="dash-pulso">{c.actividad.confirmados}</td>
+                  <td>{c.messagesReady + c.messagesUnacknowledged}</td>
                   <td>{c.consumers}</td>
+                  <td>{c.leader ? c.leader.replace('rabbit@', '') : '—'}</td>
                   <td>
                     <button
                       className="dash-icon-btn dash-icon-btn--danger"

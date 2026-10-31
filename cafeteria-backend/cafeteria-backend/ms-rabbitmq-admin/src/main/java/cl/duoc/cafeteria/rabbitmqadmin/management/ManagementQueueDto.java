@@ -13,5 +13,7 @@ public record ManagementQueueDto(
         @JsonProperty("messages_ready") Long messagesReady,
         @JsonProperty("messages_unacknowledged") Long messagesUnacknowledged,
         Integer consumers,
-        Map<String, Object> arguments) {
+        Map<String, Object> arguments,
+        String leader,
+        @JsonProperty("message_stats") ManagementMessageStatsDto messageStats) {
 }

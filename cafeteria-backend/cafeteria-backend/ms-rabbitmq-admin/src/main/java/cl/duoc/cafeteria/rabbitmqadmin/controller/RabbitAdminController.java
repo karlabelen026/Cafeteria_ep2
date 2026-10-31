@@ -116,4 +116,10 @@ public class RabbitAdminController {
     public ClusterResponse estadoCluster() {
         return service.estadoCluster();
     }
+
+    @Operation(summary = "Mensajes publicados, entregados y confirmados por el cluster, con su tasa por segundo")
+    @GetMapping("/actividad")
+    public ResumenActividadResponse resumenActividad() {
+        return service.resumenActividad();
+    }
 }

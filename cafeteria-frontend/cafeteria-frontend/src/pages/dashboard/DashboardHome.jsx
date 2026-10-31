@@ -67,6 +67,7 @@ export default function DashboardHome() {
   const [alertas, setAlertas] = useState([]);
   const [dlqResumen, setDlqResumen] = useState(null);
   const [cluster, setCluster] = useState(null);
+  const [actividadRabbit, setActividadRabbit] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
@@ -89,6 +90,7 @@ export default function DashboardHome() {
         // El estado de RabbitMQ es informativo: si falla no debe tapar los KPI.
         callApi('/rabbitmq/dlq').then((d) => setDlqResumen(d || [])).catch(() => setDlqResumen([]));
         callApi('/rabbitmq/cluster').then(setCluster).catch(() => setCluster(null));
+        callApi('/rabbitmq/actividad').then((r) => setActividadRabbit(r.actividad)).catch(() => setActividadRabbit(null));
       }
       Promise.all(pedidos)
         .then(() => setError(''))
@@ -291,8 +293,8 @@ export default function DashboardHome() {
             </a>
           </div>
           <p className="dash-empty">
-            La actividad de colas, exchanges, conexiones y consumidores se ve en el dashboard propio de RabbitMQ
-            (usuario y clave del broker). Para crear o eliminar colas, exchanges y bindings usa{' '}
+            {actividadRabbit?.publicados ?? 0} mensajes publicados · {actividadRabbit?.entregados ?? 0} entregados ·{' '}
+            {actividadRabbit?.confirmados ?? 0} confirmados. Los nodos y el movimiento en vivo se ven en{' '}
             <NavLink to="/dashboard/mensajeria">Mensajería</NavLink>.
           </p>
         </div>

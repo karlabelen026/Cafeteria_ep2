@@ -80,6 +80,12 @@ public class ManagementClient {
                 });
     }
 
+    public ManagementOverviewDto obtenerResumen() {
+        return restClient.get().uri("/api/overview")
+                .retrieve()
+                .body(ManagementOverviewDto.class);
+    }
+
     /** Lee (y saca, ackmode=ack_requeue_false) hasta "max" mensajes de una cola. */
     public List<ManagementMessageDto> leerMensajes(String nombreCola, int max) {
         Map<String, Object> body = new HashMap<>();

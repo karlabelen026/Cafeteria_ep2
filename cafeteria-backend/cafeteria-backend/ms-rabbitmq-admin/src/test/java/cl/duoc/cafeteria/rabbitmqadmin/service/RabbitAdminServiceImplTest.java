@@ -4,10 +4,15 @@ import cl.duoc.cafeteria.rabbitmqadmin.config.RabbitAdminProperties;
 import cl.duoc.cafeteria.rabbitmqadmin.dto.CreateExchangeRequest;
 import cl.duoc.cafeteria.rabbitmqadmin.dto.CreateQueueRequest;
 import cl.duoc.cafeteria.rabbitmqadmin.dto.DlqResumenResponse;
+import cl.duoc.cafeteria.rabbitmqadmin.dto.NodeResponse;
 import cl.duoc.cafeteria.rabbitmqadmin.dto.QueueResponse;
+import cl.duoc.cafeteria.rabbitmqadmin.dto.ResumenActividadResponse;
 import cl.duoc.cafeteria.rabbitmqadmin.exception.ConflictoDeNegocioException;
 import cl.duoc.cafeteria.rabbitmqadmin.exception.RecursoNoEncontradoException;
 import cl.duoc.cafeteria.rabbitmqadmin.management.ManagementClient;
+import cl.duoc.cafeteria.rabbitmqadmin.management.ManagementMessageStatsDto;
+import cl.duoc.cafeteria.rabbitmqadmin.management.ManagementNodeDto;
+import cl.duoc.cafeteria.rabbitmqadmin.management.ManagementOverviewDto;
 import cl.duoc.cafeteria.rabbitmqadmin.management.ManagementQueueDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,7 +59,7 @@ class RabbitAdminServiceImplTest {
     }
 
     private ManagementQueueDto colaDto(String nombre) {
-        return new ManagementQueueDto(nombre, "quorum", 0L, 0L, 0, null);
+        return new ManagementQueueDto(nombre, "quorum", 0L, 0L, 0, null, null, null);
     }
 
     @Test
@@ -131,12 +136,60 @@ class RabbitAdminServiceImplTest {
     @Test
     void resumenDlq_devuelveSoloLasColasQueTerminanEnDlq() {
         when(managementClient.obtenerCola("pagos.pedido-creado.queue.dlq"))
-                .thenReturn(Optional.of(new ManagementQueueDto("pagos.pedido-creado.queue.dlq", "quorum", 3L, 0L, 0, null)));
+                .thenReturn(Optional.of(new ManagementQueueDto("pagos.pedido-creado.queue.dlq", "quorum", 3L, 0L, 0, null, null, null)));
 
         List<DlqResumenResponse> resumen = service.resumenDlq();
 
         assertThat(resumen).hasSize(1);
         assertThat(resumen.get(0).nombre()).isEqualTo("pagos.pedido-creado.queue.dlq");
         assertThat(resumen.get(0).mensajes()).isEqualTo(3L);
+    }
+
+    @Test
+    void estadoCluster_cuentaColasPorLider_yNodoCaidoSinMetricas() {
+        when(managementClient.listarNodos()).thenReturn(List.of(
+                new ManagementNodeDto("rabbit@rabbitmq-1", true, "disc", 100L, 400L, false, false, 5000L),
+                new ManagementNodeDto("rabbit@rabbitmq-2", false, "disc", null, null, null, null, null)));
+        when(managementClient.listarColas()).thenReturn(List.of(
+                new ManagementQueueDto("a", "quorum", 0L, 0L, 1, null, "rabbit@rabbitmq-1", null),
+                new ManagementQueueDto("b", "quorum", 0L, 0L, 1, null, "rabbit@rabbitmq-1", null),
+                new ManagementQueueDto("c", "quorum", 0L, 0L, 1, null, null, null)));
+
+        List<NodeResponse> nodos = service.estadoCluster().nodos();
+
+        assertThat(nodos.get(0).running()).isTrue();
+        assertThat(nodos.get(0).colasLider()).isEqualTo(2L);
+        assertThat(nodos.get(0).memoriaUsada()).isEqualTo(100L);
+        assertThat(nodos.get(1).running()).isFalse();
+        assertThat(nodos.get(1).colasLider()).isZero();
+        assertThat(nodos.get(1).memoriaUsada()).isZero();
+    }
+
+    @Test
+    void resumenActividad_conTrafico_entregaTotalesYTasas() {
+        ManagementMessageStatsDto stats = new ManagementMessageStatsDto(
+                10L, new ManagementMessageStatsDto.Detalle(1.5),
+                8L, new ManagementMessageStatsDto.Detalle(1.0),
+                7L, new ManagementMessageStatsDto.Detalle(0.5));
+        when(managementClient.obtenerResumen()).thenReturn(new ManagementOverviewDto(stats,
+                new ManagementOverviewDto.Totales(4, 6, 18, 17)));
+
+        ResumenActividadResponse resumen = service.resumenActividad();
+
+        assertThat(resumen.actividad().publicados()).isEqualTo(10L);
+        assertThat(resumen.actividad().entregadosPorSeg()).isEqualTo(1.0);
+        assertThat(resumen.colas()).isEqualTo(18);
+        assertThat(resumen.conexiones()).isEqualTo(4);
+    }
+
+    @Test
+    void resumenActividad_sinTraficoAun_devuelveCeros() {
+        when(managementClient.obtenerResumen()).thenReturn(new ManagementOverviewDto(null, null));
+
+        ResumenActividadResponse resumen = service.resumenActividad();
+
+        assertThat(resumen.actividad().publicados()).isZero();
+        assertThat(resumen.actividad().publicadosPorSeg()).isZero();
+        assertThat(resumen.colas()).isZero();
     }
 }

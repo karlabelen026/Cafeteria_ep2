@@ -121,7 +121,7 @@ export default function DashboardLayout() {
             <>
               <NavLink to="/dashboard/mensajeria" className="dash__mensajeria-card">
                 <strong>🐇 Mensajería</strong>
-                Administrar colas, exchanges y bindings
+                Nodos y mensajes en vivo
               </NavLink>
               <a
                 href={rabbitDashboardUrl}

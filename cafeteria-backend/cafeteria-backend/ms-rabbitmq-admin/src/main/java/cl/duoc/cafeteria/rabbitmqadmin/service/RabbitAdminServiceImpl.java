@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Implementa toda la logica de administracion de RabbitMQ (ver
@@ -191,7 +192,17 @@ public class RabbitAdminServiceImpl implements RabbitAdminService {
 
     @Override
     public ClusterResponse estadoCluster() {
-        return new ClusterResponse(managementClient.listarNodos().stream().map(NodeResponse::desde).toList());
+        Map<String, Long> colasPorLider = managementClient.listarColas().stream()
+                .filter(cola -> cola.leader() != null)
+                .collect(Collectors.groupingBy(ManagementQueueDto::leader, Collectors.counting()));
+        return new ClusterResponse(managementClient.listarNodos().stream()
+                .map(nodo -> NodeResponse.desde(nodo, colasPorLider.getOrDefault(nodo.name(), 0L)))
+                .toList());
+    }
+
+    @Override
+    public ResumenActividadResponse resumenActividad() {
+        return ResumenActividadResponse.desde(managementClient.obtenerResumen());
     }
 
     // ---- privados ----

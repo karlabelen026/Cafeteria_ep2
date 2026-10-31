@@ -347,6 +347,115 @@ a.dash-btn:hover {
   color: var(--dash-error);
 }
 
+/* ---------- Mensajeria en vivo ---------- */
+
+.dash-en-vivo__seccion {
+  margin-bottom: 16px;
+}
+
+.dash-en-vivo__fila {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dash-nodos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.dash-nodo {
+  border: 1px solid var(--dash-border);
+  border-left: 4px solid var(--dash-success);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.dash-nodo--caido {
+  border-left-color: var(--dash-error);
+  background: #fdf1ef;
+}
+
+.dash-nodo__cabecera {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.dash-nodo__estado {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dash-nodo__estado--ok {
+  color: var(--dash-success);
+}
+
+.dash-nodo__estado--error {
+  color: var(--dash-error);
+}
+
+.dash-nodo__detalle {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--dash-text-muted);
+}
+
+.dash-movimientos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.dash-movimientos li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--dash-border);
+  animation: dash-pulso 2s ease-out;
+}
+
+.dash-movimientos__hora {
+  color: var(--dash-text-muted);
+}
+
+.dash-movimientos__cola {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dash-movimientos__cambio {
+  font-weight: 600;
+}
+
+/* Resalta un numero cuando cambia (React lo vuelve a montar con otra key). */
+.dash-pulso {
+  animation: dash-pulso 2s ease-out;
+}
+
+@keyframes dash-pulso {
+  from {
+    background: var(--dash-latte);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-pulso,
+  .dash-movimientos li {
+    animation: none;
+  }
+}
+
 /* ---------- Filas de graficos ---------- */
 
 .dash__row {

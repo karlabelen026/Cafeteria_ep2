@@ -204,7 +204,17 @@ El usuario y la clave del broker se definen en `docker-compose.yml` (`RABBITMQ_D
 
 El rol ADMIN tiene el botón **"Dashboard RabbitMQ"** (barra lateral, Resumen y Mensajería) que abre el
 panel propio de RabbitMQ (`VITE_RABBITMQ_DASHBOARD_URL`). La página "Mensajería" es el front de
-`ms-rabbitmq-admin`.
+`ms-rabbitmq-admin` y se actualiza sola cada 4 segundos:
+
+- **Nodos:** los 3 de RabbitMQ (estado, memoria, colas que lidera) y los 3 brokers de Kafka. Si se detiene
+  uno, su tarjeta pasa a "Caído". Para mostrarlo, detén `rabbitmq-2` o `kafka-2`: `ms-rabbitmq-admin` consulta
+  la API de management de `rabbitmq-1`, así que sin ese nodo la página no puede actualizar los datos de RabbitMQ.
+- **Movimiento:** mensajes publicados, entregados y confirmados, gráfico de mensajes por segundo y lista de
+  últimos movimientos. Salen de `GET /api/rabbitmq/actividad` y de cada cola. Las columnas de "En cola ahora"
+  suelen estar en 0 porque los consumidores procesan al instante; los acumulados son los que muestran el
+  movimiento y se reinician si se reinicia el cluster.
+
+Para ver movimiento basta con crear un pedido y pagarlo desde la tienda, con la página abierta.
 
 Para demostrar primero un nodo y después el cluster:
 

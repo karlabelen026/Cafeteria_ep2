@@ -39,4 +39,6 @@ public interface RabbitAdminService {
     ReprocessResponse reprocesarDlq(String nombreDlq, int max);
 
     ClusterResponse estadoCluster();
+
+    ResumenActividadResponse resumenActividad();
 }

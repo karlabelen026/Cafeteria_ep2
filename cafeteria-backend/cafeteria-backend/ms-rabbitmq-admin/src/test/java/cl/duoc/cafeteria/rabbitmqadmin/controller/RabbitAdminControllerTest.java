@@ -125,6 +125,13 @@ class RabbitAdminControllerTest {
     }
 
     @Test
+    @WithMockUser(authorities = "BARISTA")
+    void resumenActividad_sinRolAdmin_retorna403() throws Exception {
+        mockMvc.perform(get("/api/rabbitmq/actividad"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void listarColas_sinAutenticacion_retorna401() throws Exception {
         mockMvc.perform(get("/api/rabbitmq/queues"))
                 .andExpect(status().isUnauthorized());

@@ -468,6 +468,23 @@
           ]
         },
         {
+          "name": "GET /api/rabbitmq/actividad -> mensajes publicados, entregados y confirmados",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/rabbitmq/actividad", "host": ["{{baseUrl}}"], "path": ["api", "rabbitmq", "actividad"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OK', function () { pm.response.to.have.status(200); });"]
+              }
+            }
+          ]
+        },
+        {
           "name": "M8a - Crear cola con nombre vacio -> 400",
           "request": {
             "method": "POST",
