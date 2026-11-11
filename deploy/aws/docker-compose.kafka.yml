@@ -1,0 +1,169 @@
+# EC2 "kafka" (t3.medium): cluster de 3 Zookeeper + 3 brokers + Kafka UI.
+# Copia de los servicios del docker-compose.yml de la raiz (que sigue siendo
+# el de desarrollo local, todo en uno), con un cambio: el listener externo
+# PLAINTEXT_HOST se anuncia con la IP privada de esta EC2 (KAFKA_HOST_IP), asi
+# los microservicios de la EC2 de backend llegan a cada broker por su puerto
+# (9092, 9093, 9094). El Security Group solo abre esos puertos al SG de
+# backend: Kafka no queda expuesto a internet (ver infra/terraform/main.tf).
+#
+# Se levanta con (ver infra/terraform/user_data_kafka.sh.tftpl):
+#   docker compose -f deploy/aws/docker-compose.kafka.yml --env-file .env up -d
+
+name: cafeteria-kafka
+
+x-zookeeper-common: &zookeeper-common
+  image: confluentinc/cp-zookeeper:7.5.0
+  restart: unless-stopped
+  mem_limit: 256m
+
+x-zookeeper-env: &zookeeper-env
+  ZOOKEEPER_CLIENT_PORT: 2181
+  ZOOKEEPER_TICK_TIME: 2000
+  ZOOKEEPER_INIT_LIMIT: 10
+  ZOOKEEPER_SYNC_LIMIT: 5
+  ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+  KAFKA_HEAP_OPTS: "-Xms48m -Xmx128m"
+
+x-kafka-common: &kafka-common
+  image: confluentinc/cp-kafka:7.5.0
+  restart: unless-stopped
+  mem_limit: 896m
+  depends_on:
+    - zookeeper-1
+    - zookeeper-2
+    - zookeeper-3
+  healthcheck:
+    # Con heap propio: la herramienta es otra JVM dentro del mismo contenedor
+    # y, sin esto, heredaria el heap del broker y podria pasarse del mem_limit.
+    test: ["CMD-SHELL", "KAFKA_HEAP_OPTS=-Xmx64m kafka-broker-api-versions --bootstrap-server localhost:29092 > /dev/null"]
+    interval: 30s
+    timeout: 25s
+    retries: 30
+    start_period: 60s
+
+x-kafka-env: &kafka-env
+  KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+  KAFKA_ZOOKEEPER_CONNECTION_TIMEOUT_MS: 60000
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+  KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  # Con acks=all, una escritura se confirma cuando esta en al menos 2 replicas.
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  # Los topics los crean las aplicaciones (beans NewTopic) o ms-kafka-admin.
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_LOG_RETENTION_HOURS: 168
+  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 60000
+  KAFKA_HEAP_OPTS: "-Xms192m -Xmx384m"
+
+services:
+  zookeeper-1:
+    <<: *zookeeper-common
+    container_name: zookeeper-1
+    hostname: zookeeper-1
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 1
+    volumes:
+      - zookeeper_1_data:/var/lib/zookeeper/data
+      - zookeeper_1_log:/var/lib/zookeeper/log
+
+  zookeeper-2:
+    <<: *zookeeper-common
+    container_name: zookeeper-2
+    hostname: zookeeper-2
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 2
+    volumes:
+      - zookeeper_2_data:/var/lib/zookeeper/data
+      - zookeeper_2_log:/var/lib/zookeeper/log
+
+  zookeeper-3:
+    <<: *zookeeper-common
+    container_name: zookeeper-3
+    hostname: zookeeper-3
+    environment:
+      <<: *zookeeper-env
+      ZOOKEEPER_SERVER_ID: 3
+    volumes:
+      - zookeeper_3_data:/var/lib/zookeeper/data
+      - zookeeper_3_log:/var/lib/zookeeper/log
+
+  kafka-1:
+    <<: *kafka-common
+    container_name: kafka-1
+    hostname: kafka-1
+    ports:
+      - "9092:9092"
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 1
+      # kafka-1:29092 entre brokers y para Kafka UI; IP privada:9092 para la EC2 de backend.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://${KAFKA_HOST_IP:?Falta KAFKA_HOST_IP en .env}:9092
+    volumes:
+      - kafka_1_data:/var/lib/kafka/data
+
+  kafka-2:
+    <<: *kafka-common
+    container_name: kafka-2
+    hostname: kafka-2
+    ports:
+      - "9093:9093"
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 2
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://${KAFKA_HOST_IP:?Falta KAFKA_HOST_IP en .env}:9093
+    volumes:
+      - kafka_2_data:/var/lib/kafka/data
+
+  kafka-3:
+    <<: *kafka-common
+    container_name: kafka-3
+    hostname: kafka-3
+    ports:
+      - "9094:9094"
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 3
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://${KAFKA_HOST_IP:?Falta KAFKA_HOST_IP en .env}:9094
+    volumes:
+      - kafka_3_data:/var/lib/kafka/data
+
+  # Topics, particiones/replicas, consumer groups y lag. El Security Group solo
+  # abre el 8095 a my_ip_cidr.
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    mem_limit: 512m
+    ports:
+      - "8095:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: cafeteria
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      JAVA_OPTS: "-Xms64m -Xmx256m"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+
+volumes:
+  zookeeper_1_data:
+  zookeeper_1_log:
+  zookeeper_2_data:
+  zookeeper_2_log:
+  zookeeper_3_data:
+  zookeeper_3_log:
+  kafka_1_data:
+  kafka_2_data:
+  kafka_3_data:

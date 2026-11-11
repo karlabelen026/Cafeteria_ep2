@@ -1,0 +1,83 @@
+name: Build - Imagen del backend (GHCR)
+
+# Compila los 13 servicios del backend UNA sola vez (reactor Maven completo) y
+# publica una unica imagen en GitHub Container Registry. La EC2 de backend solo
+# hace "docker pull" de esta imagen (ver deploy/aws/docker-compose.apps.yml e
+# infra/terraform/README.md), en vez de compilar todo en cada arranque.
+on:
+  push:
+    branches: [main, deploy]
+    paths:
+      - "cafeteria-backend/**"
+      - ".github/workflows/build-images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compilar y publicar ghcr.io/<owner>/cafeteria-backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cafeteria-backend/cafeteria-backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: "mvnw package (reactor completo, sin pruebas: ya las corre ci.yml)"
+        run: ./mvnw -B -q package -DskipTests
+
+      - name: Juntar los .jar de los 13 servicios en jars/
+        run: |
+          mkdir -p jars
+          for modulo in */; do
+            modulo="${modulo%/}"
+            [ "$modulo" = "cafeteria-common" ] && continue
+            if [ -f "$modulo/target/$modulo.jar" ]; then
+              cp "$modulo/target/$modulo.jar" jars/
+            fi
+          done
+          ls -l jars
+          test "$(ls jars/*.jar | wc -l)" -eq 13
+
+      - name: Nombre de la imagen (GHCR exige el owner en minusculas)
+        id: imagen
+        run: echo "nombre=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cafeteria-backend" >> "$GITHUB_OUTPUT"
+
+      - name: Login en GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Construir y publicar
+        uses: docker/build-push-action@v6
+        with:
+          context: cafeteria-backend/cafeteria-backend
+          file: cafeteria-backend/cafeteria-backend/Dockerfile.runtime
+          push: true
+          tags: |
+            ${{ steps.imagen.outputs.nombre }}:${{ github.ref_name }}
+            ${{ steps.imagen.outputs.nombre }}:sha-${{ github.sha }}
+            ${{ steps.imagen.outputs.nombre }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=Backend de CafeGestion360 (13 servicios, elegir con MODULE)

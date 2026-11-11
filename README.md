@@ -249,6 +249,10 @@ Overview y de cada cola, con el refresco en 5 segundos.
 ```
 ms-pagos ──(TransaccionPagoEvent, key = cliente)──> cafeteria.pagos.transacciones
                                                          │
+                         ┌───────────────────────────────┴──────────────────────────────┐
+     ms-reportes (group reportes-tiempo-real)                                          │
+     auditoría + métricas en tiempo real (Reportes)                                     │
+     errores: reintentos 1s/2s/4s -> cafeteria.pagos.transacciones.reportes.DLT        │
                                        ms-antifraude (Kafka Streams, application-id cafeteria-antifraude)
                                          1. Source      lee la transacción
                                          2. Filtro      descarta montos < 10 CLP
@@ -267,6 +271,20 @@ ms-pagos ──(TransaccionPagoEvent, key = cliente)──> cafeteria.pagos.tran
 
 Umbrales, tasa de cambio, topics y consumer groups se configuran solo en `application.yml`
 (`app.kafka` y `app.antifraude`) y se leen con `KafkaTopicsProperties` / `AntifraudeProperties`.
+
+### Reportería y auditoría en tiempo real (`ms-reportes`)
+
+El mismo topic de transacciones lo leen **dos** consumer groups independientes, cada uno con su lag en
+Kafka UI: `cafeteria-antifraude` (Kafka Streams) y `reportes-tiempo-real` (ms-reportes, 3 consumidores).
+ms-reportes guarda cada transacción en la tabla `auditoria_transacciones` (PK `eventId`, así que un
+evento repetido no se cuenta dos veces) con la partición y el offset de donde se leyó, y calcula:
+
+| Endpoint (ADMIN y GERENTE) | Qué entrega |
+|---|---|
+| `GET /api/reportes/tiempo-real?minutos=15` | total, aprobadas, rechazadas, tasa de aprobación, monto aprobado, ticket promedio, monto por método de pago, serie por minuto y latencia promedio entre la publicación y el registro |
+| `GET /api/reportes/auditoria/transacciones?limite=50&cliente=` | últimas transacciones auditadas, con partición y offset |
+
+La página **Reportes** muestra la tarjeta "Tiempo real (Kafka)", que se refresca cada 5 segundos.
 
 ### Kafka y RabbitMQ en este proyecto
 
@@ -404,8 +422,9 @@ api "carga?cantidad=10000"                                                      
 4. Una compra real en la tienda de más de 50.000 CLP también genera la alerta, porque ms-pagos publica
    cada pago en Kafka.
 
-En local, Kafka UI queda en http://localhost:8095. En AWS, en `http://<IP_backend>:8095`, abierto solo para
-tu IP (`MY_IP_CIDR`); el puerto 9092 del broker no se abre a internet.
+En local, Kafka UI queda en http://localhost:8095. En AWS, en `http://<IP_kafka>:8095` (output
+`kafka_ui_url`), abierto solo para tu IP (`MY_IP_CIDR`); los puertos 9092–9094 de los brokers solo
+aceptan conexiones desde la EC2 de backend.
 
 ---
 
@@ -449,9 +468,24 @@ El archivo `.env` nunca se sube al repositorio.
 
 ## 8. Despliegue en AWS
 
-Terraform (`infra/terraform`) crea dos EC2 —backend y frontend—, sus Elastic IP, un volumen para MySQL
-y un API Gateway delante del BFF. Se ejecuta con GitHub Actions; el detalle está en
+Terraform (`infra/terraform`) crea cuatro EC2, sus Elastic IP, un volumen para MySQL y un API Gateway
+delante del BFF. Se ejecuta con GitHub Actions; el detalle está en
 [`infra/terraform/README.md`](infra/terraform/README.md).
+
+| EC2 | Qué corre |
+|---|---|
+| frontend (t3.micro) | nginx con el build de React |
+| backend (t3.large) | MySQL + los 13 servicios, con la imagen ya compilada en GHCR |
+| kafka (t3.medium) | 3 Zookeeper + 3 brokers + Kafka UI |
+| rabbitmq (t3.medium) | cluster RabbitMQ de 3 nodos |
+
+El backend ya no compila en la EC2: `build-images.yml` compila los 13 servicios una vez en GitHub
+Actions y publica una sola imagen (`ghcr.io/<owner>/cafeteria-backend`); cada contenedor elige su
+servicio con `MODULE`. Los compose de cada EC2 están en `deploy/aws/`; el `docker-compose.yml` de la
+raíz sigue siendo el de desarrollo local.
+
+Antes del primer deploy, una sola vez: GitHub → **Packages** → `cafeteria-backend` →
+**Change visibility** → **Public** (o crea el secret `GHCR_TOKEN` con un PAT `read:packages`).
 
 ```bash
 R=<usuario>/<repositorio>
@@ -462,13 +496,14 @@ gh secret set AWS_SECRET_ACCESS_KEY -R $R
 gh secret set AWS_SESSION_TOKEN -R $R
 gh secret set MY_IP_CIDR -R $R --body "<tu-ip>/32"    # SSH y panel de RabbitMQ solo desde tu IP
 
-gh workflow run terraform-destroy.yml -R $R --ref ep2 -f confirmar=destruir   # borra todo, incluida la base
-gh workflow run terraform-deploy.yml  -R $R --ref ep2 -f repo_branch=ep2
+git push origin <rama>:deploy                        # publica la imagen (build-images.yml)
+gh workflow run terraform-destroy.yml -R $R --ref deploy -f confirmar=destruir   # borra todo, incluida la base
+gh workflow run terraform-deploy.yml  -R $R --ref deploy -f repo_branch=deploy -f backend_image_tag=deploy
 ```
 
-Después del deploy el backend tarda unos 10–15 minutos en compilar. Las URL salen en el resumen del
-workflow. Para actualizar el código sin recrear la instancia: `git pull` en `/opt/cafeteria` y
-`sudo systemctl restart cafeteria.service`.
+Tiempos esperados después del deploy: rabbitmq 1–2 min, kafka unos 2 min, backend 3–5 min (espera a
+los brokers y baja la imagen). Las URL salen en el resumen del workflow. Para actualizar el backend
+después de un push, basta con `sudo systemctl restart cafeteria` en su EC2: vuelve a bajar la imagen.
 
 ---
 
@@ -500,6 +535,7 @@ Colección de Postman: [`docs/postman`](docs/postman).
 cafeteria-backend/cafeteria-backend/   microservicios, BFF y cafeteria-common
 cafeteria-frontend/cafeteria-frontend/ aplicación React
 infra/terraform/                       infraestructura de AWS
+deploy/aws/                            compose de cada EC2 (apps, kafka, rabbitmq) y su .env.example
 rabbitmq/rabbitmq.conf                 formación del cluster
 scripts/                               smoke test y arranque del cluster por etapas
 ms-antifraude (en el backend)          topología de Kafka Streams: streams/AntifraudeTopology.java
@@ -514,5 +550,6 @@ docker-compose.yml                     stack completo
 - La pauta pide el frontend en Angular; este proyecto usa React + Vite, decisión heredada de la EP1.
 - La base `cafeteria` de MySQL de versiones anteriores queda sin uso; no se borra automáticamente.
 - El pago es una simulación con fines académicos.
-- Los 3 brokers y los 3 Zookeeper corren en la misma EC2: replican los datos y toleran la caída de un
-  contenedor, pero no la de la máquina. En producción irían en máquinas y zonas de disponibilidad distintas.
+- Kafka y RabbitMQ tienen su propia EC2, separada del backend, pero sus 3 nodos comparten esa máquina:
+  replican los datos y toleran la caída de un contenedor, no la de la EC2. En producción irían en
+  máquinas y zonas de disponibilidad distintas.

@@ -1,14 +1,16 @@
 # Alarmas de "auto-recovery" (ver docs/EP2_PLAN.md sección 8.1: sin esto, si
-# alguna de las dos EC2 falla un chequeo de AWS nadie se entera hasta la
+# alguna de las EC2 falla un chequeo de AWS nadie se entera hasta la
 # próxima demo). count = 0 si enable_recovery_alarms = false, por si el
 # Learner Lab no deja usar acciones de alarma "aws:recover"/"aws:reboot".
 
 locals {
-  # Una entrada por instancia a monitorear: backend (MySQL/RabbitMQ/ms/bff) y
-  # frontend (nginx). Mismo par de alarmas para cada una.
+  # Una entrada por instancia a monitorear: backend (MySQL/ms/bff), frontend
+  # (nginx), kafka y rabbitmq. Mismo par de alarmas para cada una.
   monitored_instances = {
     backend  = aws_instance.backend.id
     frontend = aws_instance.frontend.id
+    kafka    = aws_instance.kafka.id
+    rabbitmq = aws_instance.rabbitmq.id
   }
 }
 

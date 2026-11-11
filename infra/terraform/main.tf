@@ -42,28 +42,12 @@ resource "random_password" "internal_api_token" {
 
 resource "aws_security_group" "backend" {
   name        = "cafeteria360-backend-sg"
-  description = "CafeGestion360 backend (MySQL, RabbitMQ, microservicios, bff-gateway): SSH y UI de RabbitMQ solo desde mi IP; 8080 publico para el API Gateway"
+  description = "CafeGestion360 backend (MySQL, microservicios, bff-gateway): SSH solo desde mi IP; 8080 publico para el API Gateway"
 
   ingress {
     description = "SSH"
     from_port   = 22
     to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
-  }
-
-  ingress {
-    description = "RabbitMQ management UI (solo nodo 1)"
-    from_port   = 15672
-    to_port     = 15672
-    protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
-  }
-
-  ingress {
-    description = "Kafka UI (Fase 8): solo desde mi IP. El broker (9092) NO se abre"
-    from_port   = 8095
-    to_port     = 8095
     protocol    = "tcp"
     cidr_blocks = [var.my_ip_cidr]
   }
@@ -86,6 +70,98 @@ resource "aws_security_group" "backend" {
 
   tags = {
     Name = "cafeteria360-backend-sg"
+  }
+}
+
+# Kafka y RabbitMQ solo aceptan trafico de los microservicios (SG de backend),
+# nunca de internet. Las UIs de administracion quedan abiertas solo a mi IP.
+resource "aws_security_group" "kafka" {
+  name        = "cafeteria360-kafka-sg"
+  description = "CafeGestion360 Kafka (3 brokers + Kafka UI): brokers solo desde el backend; SSH y Kafka UI solo desde mi IP"
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+  ingress {
+    description = "Kafka UI"
+    from_port   = 8095
+    to_port     = 8095
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+  ingress {
+    description     = "Brokers kafka-1/2/3 (listener PLAINTEXT_HOST): solo los microservicios"
+    from_port       = 9092
+    to_port         = 9094
+    protocol        = "tcp"
+    security_groups = [aws_security_group.backend.id]
+  }
+
+  egress {
+    description = "Salida libre (pull de imagenes, apt, git)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "cafeteria360-kafka-sg"
+  }
+}
+
+resource "aws_security_group" "rabbitmq" {
+  name        = "cafeteria360-rabbitmq-sg"
+  description = "CafeGestion360 RabbitMQ (3 nodos): AMQP solo desde el backend; SSH y management desde mi IP"
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+  ingress {
+    description = "RabbitMQ management UI (nodo 1)"
+    from_port   = 15672
+    to_port     = 15672
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_cidr]
+  }
+
+  ingress {
+    description     = "AMQP de rabbitmq-1/2/3: solo los microservicios"
+    from_port       = 5672
+    to_port         = 5674
+    protocol        = "tcp"
+    security_groups = [aws_security_group.backend.id]
+  }
+
+  ingress {
+    description     = "API de management para ms-rabbitmq-admin"
+    from_port       = 15672
+    to_port         = 15672
+    protocol        = "tcp"
+    security_groups = [aws_security_group.backend.id]
+  }
+
+  egress {
+    description = "Salida libre (pull de imagenes, apt, git)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "cafeteria360-rabbitmq-sg"
   }
 }
 
@@ -151,6 +227,80 @@ resource "aws_eip" "frontend" {
   }
 }
 
+# 4 Elastic IPs en total (el Learner Lab permite hasta 5): las de Kafka y
+# RabbitMQ solo sirven para entrar a sus UIs y por SSH desde mi IP; los
+# microservicios les hablan por IP privada.
+resource "aws_eip" "kafka" {
+  domain = "vpc"
+
+  tags = {
+    Name = "cafeteria360-kafka-eip"
+  }
+}
+
+resource "aws_eip" "rabbitmq" {
+  domain = "vpc"
+
+  tags = {
+    Name = "cafeteria360-rabbitmq-eip"
+  }
+}
+
+# Kafka y RabbitMQ van en EC2 propias (separadas del backend). Sus IP privadas
+# no cambian al detener/iniciar la instancia, por eso el backend las recibe
+# directo en su user_data.
+resource "aws_instance" "kafka" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.kafka_instance_type
+  key_name               = var.key_name
+  iam_instance_profile   = var.iam_instance_profile
+  vpc_security_group_ids = [aws_security_group.kafka.id]
+
+  # Ver el comentario en aws_instance.backend.
+  user_data_replace_on_change = true
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = 20
+  }
+
+  user_data = templatefile("${path.module}/user_data_kafka.sh.tftpl", {
+    repo_url    = var.repo_url
+    repo_branch = var.repo_branch
+  })
+
+  tags = {
+    Name = "cafeteria360-kafka"
+  }
+}
+
+resource "aws_instance" "rabbitmq" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.rabbitmq_instance_type
+  key_name               = var.key_name
+  iam_instance_profile   = var.iam_instance_profile
+  vpc_security_group_ids = [aws_security_group.rabbitmq.id]
+
+  # Ver el comentario en aws_instance.backend.
+  user_data_replace_on_change = true
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = 20
+  }
+
+  user_data = templatefile("${path.module}/user_data_rabbitmq.sh.tftpl", {
+    repo_url               = var.repo_url
+    repo_branch            = var.repo_branch
+    rabbitmq_password      = var.rabbitmq_password
+    rabbitmq_erlang_cookie = var.rabbitmq_erlang_cookie
+  })
+
+  tags = {
+    Name = "cafeteria360-rabbitmq"
+  }
+}
+
 resource "aws_instance" "backend" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.backend_instance_type
@@ -171,9 +321,8 @@ resource "aws_instance" "backend" {
 
   root_block_device {
     volume_type = "gp3"
-    # 50 GB: "docker compose build" de los 10 contenedores (8 ms + bff +
-    # notificaciones+admin, cada uno con su propia imagen Maven) + la imagen
-    # de MySQL y los 3 nodos RabbitMQ dejaba el disco muy justo con menos.
+    # Ya no compila nada (solo pull de la imagen de GHCR, que pesa cerca de
+    # 2 GB); se mantiene el tamano para no reemplazar el disco sin necesidad.
     volume_size = 50
   }
 
@@ -183,12 +332,15 @@ resource "aws_instance" "backend" {
     frontend_hostname       = local.frontend_hostname
     db_password             = var.db_password
     rabbitmq_password       = var.rabbitmq_password
-    rabbitmq_erlang_cookie  = var.rabbitmq_erlang_cookie
     azure_issuer_uri        = var.azure_issuer_uri
     azure_backend_client_id = var.azure_backend_client_id
     azure_jwk_set_uri       = var.azure_jwk_set_uri
     origin_verify_secret    = random_password.origin_verify_secret.result
     internal_api_token      = random_password.internal_api_token.result
+    backend_image           = var.backend_image
+    ghcr_token              = var.ghcr_token
+    kafka_private_ip        = aws_instance.kafka.private_ip
+    rabbitmq_private_ip     = aws_instance.rabbitmq.private_ip
   })
 
   tags = {
@@ -244,8 +396,8 @@ resource "aws_instance" "frontend" {
     azure_backend_client_id  = var.azure_backend_client_id
     azure_authority          = var.azure_authority
     api_gateway_url          = "${aws_apigatewayv2_api.app.api_endpoint}/api"
-    rabbitmq_dashboard_url   = "http://${aws_eip.backend.public_ip}:15672"
-    kafka_ui_url             = "http://${aws_eip.backend.public_ip}:8095"
+    rabbitmq_dashboard_url   = "http://${aws_eip.rabbitmq.public_ip}:15672"
+    kafka_ui_url             = "http://${aws_eip.kafka.public_ip}:8095"
   })
 
   tags = {
@@ -261,4 +413,14 @@ resource "aws_eip_association" "backend" {
 resource "aws_eip_association" "frontend" {
   instance_id   = aws_instance.frontend.id
   allocation_id = aws_eip.frontend.id
+}
+
+resource "aws_eip_association" "kafka" {
+  instance_id   = aws_instance.kafka.id
+  allocation_id = aws_eip.kafka.id
+}
+
+resource "aws_eip_association" "rabbitmq" {
+  instance_id   = aws_instance.rabbitmq.id
+  allocation_id = aws_eip.rabbitmq.id
 }

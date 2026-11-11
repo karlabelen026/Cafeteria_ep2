@@ -46,6 +46,9 @@ jobs:
       - name: Verificar backend remoto e inicializar
         run: ./init-backend.sh
 
+      - name: Imagen del backend (variable obligatoria; para destruir da igual el tag)
+        run: echo "TF_VAR_backend_image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cafeteria-backend:deploy" >> "$GITHUB_ENV"
+
       - name: terraform destroy
         run: terraform destroy -input=false -auto-approve
         env:

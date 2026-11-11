@@ -9,9 +9,33 @@ variable "region" {
 }
 
 variable "backend_instance_type" {
-  description = "Tipo de instancia EC2 que corre MySQL + los 3 nodos RabbitMQ + los 9 microservicios + bff-gateway (todo menos el frontend, ver main.tf). t3.xlarge daria mas margen de memoria, pero la politica Pvoclabs2 del Learner Lab deniega RunInstances/StartInstances para cualquier tamano mayor a large (confirmado con --dry-run); por eso se usa t3.large, con el mem_limit de RabbitMQ (ver docker-compose.yml) como colchon."
+  description = "Tipo de instancia EC2 que corre MySQL + los 13 servicios del backend (Kafka y RabbitMQ tienen sus propias EC2, ver main.tf). La politica Pvoclabs2 del Learner Lab deniega RunInstances/StartInstances para cualquier tamano mayor a large (confirmado con --dry-run)."
   type        = string
   default     = "t3.large"
+}
+
+variable "kafka_instance_type" {
+  description = "Tipo de instancia EC2 del cluster Kafka (3 Zookeeper + 3 brokers + Kafka UI, ver deploy/aws/docker-compose.kafka.yml)."
+  type        = string
+  default     = "t3.medium"
+}
+
+variable "rabbitmq_instance_type" {
+  description = "Tipo de instancia EC2 del cluster RabbitMQ de 3 nodos (ver deploy/aws/docker-compose.rabbitmq.yml)."
+  type        = string
+  default     = "t3.medium"
+}
+
+variable "backend_image" {
+  description = "Imagen unica de los 13 servicios del backend, publicada en GHCR por .github/workflows/build-images.yml. Ej: ghcr.io/<owner>/cafeteria-backend:deploy"
+  type        = string
+}
+
+variable "ghcr_token" {
+  description = "Opcional: token de GitHub con permiso read:packages, solo si el package de GHCR es privado. Vacio = el package es publico y la EC2 hace pull sin login."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "frontend_instance_type" {
@@ -39,7 +63,7 @@ variable "iam_instance_profile" {
 }
 
 variable "my_ip_cidr" {
-  description = "Tu IP pública en formato CIDR (p.ej. \"190.123.45.67/32\"), para restringir SSH (22) y la UI de RabbitMQ (15672) solo a ti."
+  description = "Tu IP pública en formato CIDR (p.ej. \"190.123.45.67/32\"), para restringir SSH (22), la UI de RabbitMQ (15672) y Kafka UI (8095) solo a ti."
   type        = string
 }
 

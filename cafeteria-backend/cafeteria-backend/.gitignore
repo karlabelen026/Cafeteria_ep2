@@ -32,3 +32,6 @@ application-secrets.properties
 data/
 *.mv.db
 *.trace.db
+
+# Jars juntados por .github/workflows/build-images.yml para Dockerfile.runtime
+jars/
