@@ -1,11 +1,11 @@
 #!/bin/bash
 # Generado por Terraform (infra/terraform/main.tf, aws_instance.backend) a
 # partir de este template. Se ejecuta una sola vez al primer arranque de la
-# EC2 (cloud-init). Levanta MySQL + los 3 nodos RabbitMQ + los 9
-# microservicios + bff-gateway (todo menos el frontend, que corre en su
-# propia instancia, ver user_data_frontend.sh.tftpl) y crea el servicio
-# systemd que los vuelve a levantar en cada arranque posterior (ver
-# docs/EP2_PLAN.md sección 8.1: el Learner Lab detiene la instancia al
+# EC2 (cloud-init). Levanta MySQL + los 13 servicios del backend con la imagen
+# ya compilada en GHCR (ver deploy/aws/docker-compose.apps.yml; aqui no se
+# compila nada). Kafka y RabbitMQ corren en sus propias EC2, a las que se
+# llega por IP privada. Crea el servicio systemd que vuelve a levantar todo
+# en cada arranque posterior (el Learner Lab detiene la instancia al
 # terminar la sesión del lab).
 set -euxo pipefail
 
@@ -13,7 +13,7 @@ APP_DIR=/opt/cafeteria
 
 # ── Docker + plugin de compose ──────────────────────────────────────────────
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg git
+apt-get install -y ca-certificates curl gnupg git netcat-openbsd
 
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -31,11 +31,10 @@ systemctl enable docker
 systemctl start docker
 usermod -aG docker ubuntu
 
-# ── Swap de 4 GB: la t3.large compila/corre 9 JVM + bff-gateway + MySQL + 3
-# nodos RabbitMQ; sin swap el OOM killer mata procesos durante el primer
-# "docker compose build" (ver docs/EP2_PLAN.md sección 8.1). ─────────────────
+# ── Swap de 2 GB: colchon para las 13 JVM + MySQL. Ya no hace falta mas porque
+# esta EC2 no compila nada (solo pull de la imagen). ─────────────────────────
 if [ ! -f /swapfile ]; then
-  fallocate -l 4G /swapfile
+  fallocate -l 2G /swapfile
   chmod 600 /swapfile
   mkswap /swapfile
   swapon /swapfile
@@ -47,12 +46,11 @@ fi
 # punto de montaje ya ocupado) ────────────────────────────────────────────────
 if [ ! -d "$APP_DIR/.git" ]; then
   rm -rf "$APP_DIR"
-  git clone --branch "${repo_branch}" "${repo_url}" "$APP_DIR"
+  git clone --depth 1 --branch "${repo_branch}" "${repo_url}" "$APP_DIR"
 else
   cd "$APP_DIR"
-  git fetch origin "${repo_branch}"
-  git checkout "${repo_branch}"
-  git pull origin "${repo_branch}"
+  git fetch --depth 1 origin "${repo_branch}"
+  git reset --hard FETCH_HEAD
 fi
 chown -R ubuntu:ubuntu "$APP_DIR"
 
@@ -85,8 +83,8 @@ fi
 # ── .env (nunca se commitea; ver .gitignore del repo) ─────────────────────────
 cat > "$APP_DIR/.env" <<ENV_EOF
 # Generado por Terraform (infra/terraform/user_data_backend.sh.tftpl). No
-# editar a mano: un "terraform apply" o un reinicio de la EC2 lo vuelve a
-# generar.
+# editar a mano: un "terraform apply" lo vuelve a generar.
+BACKEND_IMAGE=${backend_image}
 SPRING_PROFILES_ACTIVE=
 AZURE_ISSUER_URI=${azure_issuer_uri}
 AZURE_AUDIENCES=${azure_backend_client_id},api://${azure_backend_client_id}
@@ -99,14 +97,50 @@ INTERNAL_API_TOKEN=${internal_api_token}
 
 DB_PASSWORD=${db_password}
 
+# Kafka y RabbitMQ en sus propias EC2, por IP privada (cada broker y cada
+# nodo publica su propio puerto, ver deploy/aws/docker-compose.*.yml).
+KAFKA_BOOTSTRAP_SERVERS=${kafka_private_ip}:9092,${kafka_private_ip}:9093,${kafka_private_ip}:9094
+RABBITMQ_ADDRESSES=${rabbitmq_private_ip}:5672,${rabbitmq_private_ip}:5673,${rabbitmq_private_ip}:5674
+RABBITMQ_MANAGEMENT_URL=http://${rabbitmq_private_ip}:15672
 RABBITMQ_USER=cafeteria
 RABBITMQ_PASSWORD=${rabbitmq_password}
-RABBITMQ_ERLANG_COOKIE=${rabbitmq_erlang_cookie}
 ENV_EOF
 chown ubuntu:ubuntu "$APP_DIR/.env"
 chmod 600 "$APP_DIR/.env"
 
-# ── Servicio systemd: levanta todo menos "frontend" en cada arranque ─────────
+# ── Login en GHCR solo si el package es privado (ghcr_token). Sin "set -x"
+# para que el token no quede en /var/log/cloud-init-output.log. ─────────────
+set +x
+if [ -n "${ghcr_token}" ]; then
+  echo "${ghcr_token}" | docker login ghcr.io -u cafeteria --password-stdin
+fi
+set -x
+
+# ── Espera a Kafka y RabbitMQ: corren en otras EC2 que arrancan en paralelo, y
+# ms-antifraude (Kafka Streams) falla si arranca sin brokers. Maximo 10 min;
+# si no responden, el servicio systemd falla y vuelve a intentar. ───────────
+cat > /usr/local/bin/esperar-brokers.sh <<'SCRIPT_EOF'
+#!/bin/bash
+set -u
+DESTINOS="${kafka_private_ip}:9092 ${kafka_private_ip}:9093 ${kafka_private_ip}:9094 ${rabbitmq_private_ip}:5672 ${rabbitmq_private_ip}:5673 ${rabbitmq_private_ip}:5674"
+INICIO=$(date +%s)
+for destino in $DESTINOS; do
+  host=$${destino%:*}
+  puerto=$${destino#*:}
+  until nc -z -w 3 "$host" "$puerto"; do
+    if [ $(( $(date +%s) - INICIO )) -ge 600 ]; then
+      echo "$destino no respondio en 10 minutos" >&2
+      exit 1
+    fi
+    sleep 5
+  done
+  echo "$destino disponible"
+done
+SCRIPT_EOF
+chmod +x /usr/local/bin/esperar-brokers.sh
+
+# ── Servicio systemd: en cada arranque espera a los brokers, baja la version
+# mas reciente de la imagen y levanta MySQL + los 13 servicios (sin --build). ─
 cat > /etc/systemd/system/cafeteria.service <<SERVICE_EOF
 [Unit]
 Description=CafeGestion360 backend (docker compose)
@@ -118,8 +152,10 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=$APP_DIR
-ExecStart=/usr/bin/docker compose up -d --build mysql rabbitmq-1 rabbitmq-2 rabbitmq-3 ms-productos ms-inventario ms-pedidos ms-clientes ms-pagos ms-empleados ms-proveedores ms-reportes ms-notificaciones ms-rabbitmq-admin zookeeper-1 zookeeper-2 zookeeper-3 kafka-1 kafka-2 kafka-3 kafka-ui ms-antifraude ms-kafka-admin bff-gateway
-ExecStop=/usr/bin/docker compose down
+ExecStartPre=/usr/local/bin/esperar-brokers.sh
+ExecStartPre=/usr/bin/docker compose -f deploy/aws/docker-compose.apps.yml --env-file .env pull
+ExecStart=/usr/bin/docker compose -f deploy/aws/docker-compose.apps.yml --env-file .env up -d
+ExecStop=/usr/bin/docker compose -f deploy/aws/docker-compose.apps.yml --env-file .env down
 # Si un servicio falla al arrancar, compose aborta sin crear los que faltan: reintenta.
 Restart=on-failure
 RestartSec=30

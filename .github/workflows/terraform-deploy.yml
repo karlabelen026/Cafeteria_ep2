@@ -10,7 +10,11 @@ on:
   workflow_dispatch:
     inputs:
       repo_branch:
-        description: "Rama que la EC2 clona y corre con docker compose"
+        description: "Rama que las EC2 clonan (compose de deploy/aws y configuracion)"
+        required: false
+        default: "deploy"
+      backend_image_tag:
+        description: "Tag de ghcr.io/<owner>/cafeteria-backend que corre la EC2 de backend (lo publica build-images.yml: nombre de rama, sha-<sha> o latest)"
         required: false
         default: "deploy"
       replace_target:
@@ -55,6 +59,11 @@ jobs:
       - name: terraform fmt -check
         run: terraform fmt -check
 
+      - name: Imagen del backend en GHCR (el owner va en minusculas)
+        run: echo "TF_VAR_backend_image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cafeteria-backend:${BACKEND_IMAGE_TAG}" >> "$GITHUB_ENV"
+        env:
+          BACKEND_IMAGE_TAG: ${{ github.event.inputs.backend_image_tag || 'deploy' }}
+
       - name: terraform plan
         run: |
           REPLACE_FLAGS=()
@@ -81,8 +90,9 @@ jobs:
           TF_VAR_rabbitmq_erlang_cookie: ${{ secrets.RABBITMQ_ERLANG_COOKIE }}
           TF_VAR_enable_recovery_alarms: ${{ secrets.ENABLE_RECOVERY_ALARMS || 'true' }}
           TF_VAR_duckdns_domain: ${{ secrets.DUCKDNS_DOMAIN }}
+          TF_VAR_ghcr_token: ${{ secrets.GHCR_TOKEN }}
 
-      - name: terraform apply (crea/actualiza las 2 EC2, el volumen EBS, el API Gateway y el resto de la infraestructura AWS)
+      - name: terraform apply (crea/actualiza las 4 EC2, el volumen EBS, el API Gateway y el resto de la infraestructura AWS)
         run: terraform apply -input=false -auto-approve tfplan
 
       - name: Actualizar DuckDNS con la Elastic IP actual del frontend
@@ -106,9 +116,9 @@ jobs:
             terraform output
             echo '```'
             echo
-            echo "**Qué hizo este workflow (CI/CD, 2 etapas):**"
-            echo "1. Terraform (los pasos de arriba) creó o actualizó la infraestructura AWS: la EC2 de backend, la EC2 de frontend, el volumen EBS de MySQL y el API Gateway."
-            echo "2. Cada EC2 corre sola, al arrancar, un script (\`user_data\`) que instala Docker y ejecuta \`docker compose up --build\`: la de backend levanta MySQL + RabbitMQ + los 9 microservicios + bff-gateway; la de frontend levanta nginx con el build de React. Esto es automático, sin SSH ni intervención manual."
+            echo "**Qué hizo este workflow (CI/CD):**"
+            echo "1. Terraform (los pasos de arriba) creó o actualizó la infraestructura AWS: 4 EC2 (frontend, backend, kafka y rabbitmq), el volumen EBS de MySQL y el API Gateway."
+            echo "2. Cada EC2 corre sola, al arrancar, un script (\`user_data\`) que instala Docker y levanta su compose: kafka (3 Zookeeper + 3 brokers + Kafka UI), rabbitmq (cluster de 3 nodos), backend (MySQL + 13 servicios con la imagen \`$TF_VAR_backend_image\`, sin compilar) y frontend (nginx con el build de React). Esto es automático, sin SSH ni intervención manual."
             echo
-            echo "El primer arranque de la EC2 de backend tarda 10-15 min en compilar todo (el de frontend, 2-3 min). Podés seguirlo con 'sudo tail -f /var/log/cloud-init-output.log' por SSH, o simplemente esperar y recargar el sitio."
+            echo "Tiempos esperados del primer arranque: rabbitmq 1-2 min, kafka unos 2 min, backend 3-5 min (espera a los brokers y baja la imagen), frontend 2-3 min. Se puede seguir con 'sudo tail -f /var/log/cloud-init-output.log' por SSH."
           } >> "$GITHUB_STEP_SUMMARY"

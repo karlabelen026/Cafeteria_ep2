@@ -1,0 +1,72 @@
+# EC2 "rabbitmq" (t3.medium): cluster RabbitMQ de 3 nodos (peer discovery
+# classic_config con ../../rabbitmq/rabbitmq.conf, igual que en local). Cada
+# nodo publica su AMQP en un puerto del host (5672, 5673, 5674) para que los
+# microservicios de la EC2 de backend se conecten a los 3 (RABBITMQ_ADDRESSES);
+# el management del nodo 1 queda en el 15672. El Security Group abre AMQP solo
+# al SG de backend y el 15672 a my_ip_cidr y al backend (ver main.tf).
+#
+# Se levanta con (ver infra/terraform/user_data_rabbitmq.sh.tftpl):
+#   docker compose -f deploy/aws/docker-compose.rabbitmq.yml --env-file .env up -d
+
+name: cafeteria-rabbitmq
+
+x-rabbitmq-common: &rabbitmq-common
+  image: rabbitmq:3.13-management
+  restart: unless-stopped
+  mem_limit: 1g
+  environment:
+    RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Falta RABBITMQ_ERLANG_COOKIE en .env}
+    RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-cafeteria}
+    RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Falta RABBITMQ_PASSWORD en .env}
+  healthcheck:
+    # Espera a que RabbitMQ cree su cookie: el healthcheck corre como root y,
+    # si se adelanta en un volumen nuevo, la crea sin permisos para el broker,
+    # que entonces cae con "eacces" al arrancar (pasa con la CPU ocupada).
+    test: ["CMD-SHELL", "[ -f /var/lib/rabbitmq/.erlang.cookie ] && rabbitmq-diagnostics -q ping"]
+    interval: 10s
+    timeout: 5s
+    retries: 30
+    start_period: 60s
+
+services:
+  rabbitmq-1:
+    <<: *rabbitmq-common
+    container_name: rabbitmq-1
+    hostname: rabbitmq-1
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_1_data:/var/lib/rabbitmq
+      - ../../rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+
+  rabbitmq-2:
+    <<: *rabbitmq-common
+    container_name: rabbitmq-2
+    hostname: rabbitmq-2
+    ports:
+      - "5673:5672"
+    volumes:
+      - rabbitmq_2_data:/var/lib/rabbitmq
+      - ../../rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+
+  rabbitmq-3:
+    <<: *rabbitmq-common
+    container_name: rabbitmq-3
+    hostname: rabbitmq-3
+    ports:
+      - "5674:5672"
+    volumes:
+      - rabbitmq_3_data:/var/lib/rabbitmq
+      - ../../rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+
+volumes:
+  rabbitmq_1_data:
+  rabbitmq_2_data:
+  rabbitmq_3_data:

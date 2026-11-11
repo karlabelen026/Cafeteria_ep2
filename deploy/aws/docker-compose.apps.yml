@@ -1,0 +1,373 @@
+# EC2 "backend" (t3.large): MySQL + los 13 servicios. NO compila nada: todos
+# usan la imagen unica publicada en GHCR por .github/workflows/build-images.yml
+# (BACKEND_IMAGE) y eligen su servicio con MODULE. Kafka y RabbitMQ corren en
+# sus propias EC2: sus direcciones llegan por .env (KAFKA_BOOTSTRAP_SERVERS,
+# RABBITMQ_ADDRESSES, RABBITMQ_MANAGEMENT_URL), por eso aqui no hay depends_on
+# hacia ellos; el servicio systemd espera sus puertos antes de levantar esto
+# (ver esperar-brokers.sh en infra/terraform/user_data_backend.sh.tftpl).
+#
+# Se levanta con:
+#   docker compose -f deploy/aws/docker-compose.apps.yml --env-file .env pull
+#   docker compose -f deploy/aws/docker-compose.apps.yml --env-file .env up -d
+
+name: cafeteria-apps
+
+x-backend-common: &backend-common
+  image: ${BACKEND_IMAGE:?Falta BACKEND_IMAGE en .env}
+  pull_policy: always
+  restart: unless-stopped
+  mem_limit: 512m
+
+x-backend-env: &backend-env
+  SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE-}
+  JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+  DB_HOST: mysql
+  DB_USER: cafeteria
+  DB_PASSWORD: ${DB_PASSWORD:?Falta DB_PASSWORD en .env}
+  AZURE_ISSUER_URI: ${AZURE_ISSUER_URI:-https://login.microsoftonline.com/<TENANT_ID>/v2.0}
+  AZURE_AUDIENCES: ${AZURE_AUDIENCES:-api://cafeteria-backend}
+  AZURE_JWK_SET_URI: ${AZURE_JWK_SET_URI:-}
+  RABBITMQ_ADDRESSES: ${RABBITMQ_ADDRESSES:?Falta RABBITMQ_ADDRESSES en .env}
+  RABBITMQ_USER: ${RABBITMQ_USER:-cafeteria}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Falta RABBITMQ_PASSWORD en .env}
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Falta INTERNAL_API_TOKEN en .env}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?Falta KAFKA_BOOTSTRAP_SERVERS en .env}
+
+x-mysql-init: &depende-de-mysql
+  mysql-init:
+    condition: service_completed_successfully
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: cafeteria-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: cafeteria
+      MYSQL_USER: cafeteria
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      # Punto de montaje del volumen EBS de datos (ver aws_ebs_volume.mysql_data
+      # y user_data_backend.sh.tftpl): sobrevive a un reemplazo de la EC2.
+      - ../../mysql-data:/var/lib/mysql
+      - ../../cafeteria-backend/cafeteria-backend/init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--protocol=tcp", "-u", "cafeteria", "-p${DB_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Crea (si faltan) las bases de datos de cada microservicio. Idempotente: ver
+  # el comentario del mismo servicio en el docker-compose.yml de la raiz.
+  mysql-init:
+    image: mysql:8.4
+    container_name: cafeteria-mysql-init
+    restart: "no"
+    environment:
+      MYSQL_PWD: ${DB_PASSWORD}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        intentos=0
+        until mysql -h mysql -uroot -e "SELECT 1" >/dev/null 2>&1; do
+          intentos=$$((intentos + 1))
+          if [ "$$intentos" -ge 60 ]; then
+            echo "MySQL no acepto conexiones despues de 5 minutos." >&2
+            exit 1
+          fi
+          sleep 5
+        done
+        for db in productos inventario pedidos clientes pagos empleados proveedores reportes notificaciones; do
+          mysql -h mysql -uroot -e "CREATE DATABASE IF NOT EXISTS $$db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON $$db.* TO 'cafeteria'@'%';"
+        done
+        echo "Bases de datos por microservicio listas."
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  ms-productos:
+    <<: *backend-common
+    container_name: ms-productos
+    environment:
+      <<: *backend-env
+      MODULE: ms-productos
+    ports:
+      - "8081:8081"
+    volumes:
+      - ms_productos_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-inventario:
+    <<: *backend-common
+    container_name: ms-inventario
+    environment:
+      <<: *backend-env
+      MODULE: ms-inventario
+      MS_PEDIDOS_URL: http://ms-pedidos:8083
+    ports:
+      - "8082:8082"
+    volumes:
+      - ms_inventario_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-pedidos:
+    <<: *backend-common
+    container_name: ms-pedidos
+    environment:
+      <<: *backend-env
+      MODULE: ms-pedidos
+      MS_PRODUCTOS_URL: http://ms-productos:8081
+    ports:
+      - "8083:8083"
+    volumes:
+      - ms_pedidos_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-clientes:
+    <<: *backend-common
+    container_name: ms-clientes
+    environment:
+      <<: *backend-env
+      MODULE: ms-clientes
+      MS_PEDIDOS_URL: http://ms-pedidos:8083
+    ports:
+      - "8084:8084"
+    volumes:
+      - ms_clientes_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-pagos:
+    <<: *backend-common
+    container_name: ms-pagos
+    environment:
+      <<: *backend-env
+      MODULE: ms-pagos
+    ports:
+      - "8085:8085"
+    volumes:
+      - ms_pagos_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8085/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-empleados:
+    <<: *backend-common
+    container_name: ms-empleados
+    environment:
+      <<: *backend-env
+      MODULE: ms-empleados
+    ports:
+      - "8086:8086"
+    volumes:
+      - ms_empleados_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8086/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-proveedores:
+    <<: *backend-common
+    container_name: ms-proveedores
+    environment:
+      <<: *backend-env
+      MODULE: ms-proveedores
+    ports:
+      - "8087:8087"
+    volumes:
+      - ms_proveedores_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8087/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-reportes:
+    <<: *backend-common
+    container_name: ms-reportes
+    environment:
+      <<: *backend-env
+      MODULE: ms-reportes
+    ports:
+      - "8088:8088"
+    volumes:
+      - ms_reportes_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8088/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-notificaciones:
+    <<: *backend-common
+    container_name: ms-notificaciones
+    environment:
+      <<: *backend-env
+      MODULE: ms-notificaciones
+      MS_PEDIDOS_URL: http://ms-pedidos:8083
+    ports:
+      - "8089:8089"
+    volumes:
+      - ms_notificaciones_data:/app/data
+    depends_on: *depende-de-mysql
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8089/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # Sin base de datos: proxy hacia la API de management de RabbitMQ (nodo 1).
+  ms-rabbitmq-admin:
+    <<: *backend-common
+    container_name: ms-rabbitmq-admin
+    environment:
+      MODULE: ms-rabbitmq-admin
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE-}
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+      AZURE_ISSUER_URI: ${AZURE_ISSUER_URI:-https://login.microsoftonline.com/<TENANT_ID>/v2.0}
+      AZURE_AUDIENCES: ${AZURE_AUDIENCES:-api://cafeteria-backend}
+      AZURE_JWK_SET_URI: ${AZURE_JWK_SET_URI:-}
+      RABBITMQ_ADDRESSES: ${RABBITMQ_ADDRESSES}
+      RABBITMQ_USER: ${RABBITMQ_USER:-cafeteria}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_MANAGEMENT_URL: ${RABBITMQ_MANAGEMENT_URL:?Falta RABBITMQ_MANAGEMENT_URL en .env}
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # Kafka Streams: sin base de datos, su estado vive en topics changelog.
+  ms-antifraude:
+    <<: *backend-common
+    container_name: ms-antifraude
+    environment:
+      <<: *backend-env
+      MODULE: ms-antifraude
+    ports:
+      - "8091:8091"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ms-kafka-admin:
+    <<: *backend-common
+    container_name: ms-kafka-admin
+    environment:
+      <<: *backend-env
+      MODULE: ms-kafka-admin
+    ports:
+      - "8092:8092"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8092/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  bff-gateway:
+    <<: *backend-common
+    container_name: bff-gateway
+    environment:
+      MODULE: bff-gateway
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE-}
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+      AZURE_ISSUER_URI: ${AZURE_ISSUER_URI:-https://login.microsoftonline.com/<TENANT_ID>/v2.0}
+      AZURE_AUDIENCES: ${AZURE_AUDIENCES:-api://cafeteria-backend}
+      AZURE_JWK_SET_URI: ${AZURE_JWK_SET_URI:-}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?Falta FRONTEND_ORIGIN en .env}
+      # Lo inyecta el API Gateway en cada peticion (ver infra/terraform/apigateway.tf).
+      ORIGIN_VERIFY_SECRET: ${ORIGIN_VERIFY_SECRET:-}
+      MS_PRODUCTOS_URL: http://ms-productos:8081
+      MS_INVENTARIO_URL: http://ms-inventario:8082
+      MS_PEDIDOS_URL: http://ms-pedidos:8083
+      MS_CLIENTES_URL: http://ms-clientes:8084
+      MS_PAGOS_URL: http://ms-pagos:8085
+      MS_EMPLEADOS_URL: http://ms-empleados:8086
+      MS_PROVEEDORES_URL: http://ms-proveedores:8087
+      MS_REPORTES_URL: http://ms-reportes:8088
+      MS_NOTIFICACIONES_URL: http://ms-notificaciones:8089
+      MS_RABBITMQ_ADMIN_URL: http://ms-rabbitmq-admin:8090
+      MS_ANTIFRAUDE_URL: http://ms-antifraude:8091
+      MS_KAFKA_ADMIN_URL: http://ms-kafka-admin:8092
+    ports:
+      - "8080:8080"
+    depends_on:
+      ms-productos:
+        condition: service_healthy
+      ms-inventario:
+        condition: service_healthy
+      ms-pedidos:
+        condition: service_healthy
+      ms-clientes:
+        condition: service_healthy
+      ms-pagos:
+        condition: service_healthy
+      ms-empleados:
+        condition: service_healthy
+      ms-proveedores:
+        condition: service_healthy
+      ms-reportes:
+        condition: service_healthy
+      ms-notificaciones:
+        condition: service_healthy
+      ms-rabbitmq-admin:
+        condition: service_healthy
+      ms-antifraude:
+        condition: service_healthy
+      ms-kafka-admin:
+        condition: service_healthy
+
+volumes:
+  ms_productos_data:
+  ms_inventario_data:
+  ms_pedidos_data:
+  ms_clientes_data:
+  ms_pagos_data:
+  ms_empleados_data:
+  ms_proveedores_data:
+  ms_reportes_data:
+  ms_notificaciones_data:

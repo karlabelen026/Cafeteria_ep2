@@ -18,14 +18,44 @@ output "api_gateway_url" {
   value       = "${aws_apigatewayv2_api.app.api_endpoint}/api"
 }
 
-output "rabbitmq_management_url" {
-  description = "UI de administración de RabbitMQ del nodo 1, en la EC2 de backend (solo accesible desde my_ip_cidr)."
-  value       = "http://${aws_eip.backend.public_ip}:15672"
+output "rabbitmq_dashboard_url" {
+  description = "UI de administración de RabbitMQ del nodo 1, en la EC2 de RabbitMQ (solo accesible desde my_ip_cidr)."
+  value       = "http://${aws_eip.rabbitmq.public_ip}:15672"
 }
 
 output "kafka_ui_url" {
-  description = "Kafka UI (topics, consumer groups y lag). Solo accesible desde my_ip_cidr."
-  value       = "http://${aws_eip.backend.public_ip}:8095"
+  description = "Kafka UI (topics, consumer groups y lag), en la EC2 de Kafka. Solo accesible desde my_ip_cidr."
+  value       = "http://${aws_eip.kafka.public_ip}:8095"
+}
+
+output "kafka_elastic_ip" {
+  description = "IP pública fija de la EC2 de Kafka (solo para Kafka UI y SSH desde my_ip_cidr)."
+  value       = aws_eip.kafka.public_ip
+}
+
+output "rabbitmq_elastic_ip" {
+  description = "IP pública fija de la EC2 de RabbitMQ (solo para el management y SSH desde my_ip_cidr)."
+  value       = aws_eip.rabbitmq.public_ip
+}
+
+output "kafka_private_ip" {
+  description = "IP privada de la EC2 de Kafka: la que usan los microservicios (KAFKA_BOOTSTRAP_SERVERS)."
+  value       = aws_instance.kafka.private_ip
+}
+
+output "rabbitmq_private_ip" {
+  description = "IP privada de la EC2 de RabbitMQ: la que usan los microservicios (RABBITMQ_ADDRESSES)."
+  value       = aws_instance.rabbitmq.private_ip
+}
+
+output "kafka_ssh_command" {
+  description = "Comando para conectarse por SSH a la EC2 de Kafka con la llave del Learner Lab."
+  value       = "ssh -i labsuser.pem ubuntu@${aws_eip.kafka.public_ip}"
+}
+
+output "rabbitmq_ssh_command" {
+  description = "Comando para conectarse por SSH a la EC2 de RabbitMQ con la llave del Learner Lab."
+  value       = "ssh -i labsuser.pem ubuntu@${aws_eip.rabbitmq.public_ip}"
 }
 
 output "frontend_ssh_command" {

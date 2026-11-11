@@ -1,9 +1,19 @@
 # Terraform — CafeGestión360 en AWS Academy Learner Lab
 
-Crea **dos** EC2 (Ubuntu 22.04) con Docker Compose: una de **backend**
-(MySQL + RabbitMQ cluster + los 8 microservicios + bff-gateway) y otra de
-**frontend** (solo nginx sirviendo el build de React), más un API Gateway
-(HTTP API) delante del BFF de la instancia de backend. El frontend nunca le
+Crea **cuatro** EC2 (Ubuntu 22.04) con Docker Compose, más un API Gateway
+(HTTP API) delante del BFF de la instancia de backend:
+
+| EC2 | Tipo | Qué corre | Compose |
+|---|---|---|---|
+| frontend | t3.micro | nginx con el build de React | `docker-compose.yml` de la raíz (`--no-deps frontend`) |
+| backend | t3.large | MySQL + los 13 servicios, con la imagen ya compilada en GHCR | `deploy/aws/docker-compose.apps.yml` |
+| kafka | t3.medium | 3 Zookeeper + 3 brokers + Kafka UI | `deploy/aws/docker-compose.kafka.yml` |
+| rabbitmq | t3.medium | cluster RabbitMQ de 3 nodos | `deploy/aws/docker-compose.rabbitmq.yml` |
+
+Los microservicios llegan a Kafka y RabbitMQ por **IP privada** (no cambia al
+detener/iniciar las instancias); sus Security Groups solo aceptan los puertos
+de los brokers desde el SG de backend. Las UIs (Kafka UI 8095, RabbitMQ 15672)
+y SSH quedan abiertos solo a `my_ip_cidr`. El frontend nunca le
 habla a la instancia de backend directamente: siempre pasa por el API
 Gateway (`VITE_API_BASE_URL`). Pensado para el Learner Lab: usa el key pair
 `vockey` y el `LabInstanceProfile` ya existentes, y no crea ningún rol ni
@@ -18,12 +28,14 @@ sección 8.
 |---|---|
 | `versions.tf` | providers `aws` y `random` |
 | `variables.tf` | todas las variables de entrada |
-| `main.tf` | AMI Ubuntu 22.04, 2 Security Groups, 2 Elastic IP, las 2 instancias EC2 (backend: disco gp3 50 GB; frontend: 20 GB) |
+| `main.tf` | AMI Ubuntu 22.04, 4 Security Groups, 4 Elastic IP (el Learner Lab permite 5), las 4 instancias EC2 (backend: disco gp3 50 GB; frontend, kafka y rabbitmq: 20 GB) |
 | `monitoring.tf` | alarmas CloudWatch de auto-recuperación/reinicio, una por cada instancia |
 | `apigateway.tf` | API Gateway HTTP API → proxy hacia el BFF de la instancia de backend en el puerto 8080, inyectando `X-Origin-Verify` |
-| `user_data_backend.sh.tftpl` | script de primer arranque de la instancia de backend: Docker, swap 4 GB, clona el repo, genera `.env`, crea `cafeteria.service` (levanta todo menos `frontend`) |
+| `user_data_backend.sh.tftpl` | primer arranque del backend: Docker, swap 2 GB, clona el repo, monta el EBS de MySQL, genera `.env` (imagen, IPs privadas de Kafka y RabbitMQ), `esperar-brokers.sh` y `cafeteria.service` (espera a los brokers, `pull` y `up -d`, sin compilar) |
+| `user_data_kafka.sh.tftpl` | primer arranque de kafka: Docker, swap 2 GB, clona el repo, `.env` con su IP privada (`KAFKA_HOST_IP`) y `cafeteria-kafka.service` |
+| `user_data_rabbitmq.sh.tftpl` | primer arranque de rabbitmq: Docker, clona el repo, `.env` con credenciales y cookie, `cafeteria-rabbitmq.service` |
 | `user_data_frontend.sh.tftpl` | script de primer arranque de la instancia de frontend: Docker, swap 2 GB, clona el repo, genera `.env`, certificado autofirmado, crea `cafeteria.service` (levanta solo `frontend`, con `--no-deps`) |
-| `outputs.tf` | IPs elásticas, URLs, comandos SSH, secreto de `X-Origin-Verify` |
+| `outputs.tf` | IPs elásticas y privadas, URLs (frontend, API Gateway, Kafka UI, RabbitMQ), comandos SSH, secreto de `X-Origin-Verify` |
 | `backend.tf` | backend remoto S3 + bloqueo DynamoDB (vacío: se configura en `init-backend.sh`) |
 | `init-backend.sh` | crea (si no existen) el bucket S3 y la tabla DynamoDB del state remoto, y corre `terraform init` apuntando a ellos — lo usan tanto GitHub Actions como vos en local |
 
@@ -65,17 +77,23 @@ Después del `apply`:
 2. Abre `https://<frontend_elastic_ip>` y acepta la advertencia del
    certificado autofirmado (es autofirmado a propósito, no hay dominio
    propio).
-3. UI de RabbitMQ: `http://<backend_elastic_ip>:15672` (solo visible desde
-   tu IP).
+3. UI de RabbitMQ: `terraform output rabbitmq_dashboard_url`; Kafka UI:
+   `terraform output kafka_ui_url` (las dos solo visibles desde tu IP).
 4. El frontend y el `.env` del backend ya quedan apuntando al API Gateway
    (`terraform output api_gateway_url`): no hace falta tocar nada a mano.
 
-### Ver el arranque (tarda 10–15 min la primera vez el backend; unos pocos
-### minutos el frontend)
+### Ver el arranque
+
+Tiempos esperados del primer arranque: rabbitmq 1–2 min, kafka unos 2 min,
+backend 3–5 min (espera a que respondan los brokers y baja la imagen de GHCR),
+frontend 2–3 min. Al reiniciar el Lab es más rápido: las imágenes ya están.
 
 ```bash
 ssh -i labsuser.pem ubuntu@<backend_elastic_ip> 'sudo tail -f /var/log/cloud-init-output.log'
-ssh -i labsuser.pem ubuntu@<backend_elastic_ip> 'cd /opt/cafeteria && sudo docker compose ps'
+ssh -i labsuser.pem ubuntu@<backend_elastic_ip> 'sudo journalctl -u cafeteria -f'
+ssh -i labsuser.pem ubuntu@<backend_elastic_ip> 'cd /opt/cafeteria && sudo docker compose -f deploy/aws/docker-compose.apps.yml --env-file .env ps'
+ssh -i labsuser.pem ubuntu@<kafka_elastic_ip> 'cd /opt/cafeteria && sudo docker compose -f deploy/aws/docker-compose.kafka.yml --env-file .env ps'
+ssh -i labsuser.pem ubuntu@<rabbitmq_elastic_ip> 'cd /opt/cafeteria && sudo docker compose -f deploy/aws/docker-compose.rabbitmq.yml --env-file .env ps'
 
 ssh -i labsuser.pem ubuntu@<frontend_elastic_ip> 'sudo tail -f /var/log/cloud-init-output.log'
 ssh -i labsuser.pem ubuntu@<frontend_elastic_ip> 'cd /opt/cafeteria && sudo docker compose ps'
@@ -83,9 +101,11 @@ ssh -i labsuser.pem ubuntu@<frontend_elastic_ip> 'cd /opt/cafeteria && sudo dock
 
 ### Actualizar después de un `git push`
 
+El push a `main` o `deploy` vuelve a publicar la imagen (`build-images.yml`).
+En el backend basta con reiniciar el servicio, que hace `pull` y `up -d`:
+
 ```bash
-ssh -i labsuser.pem ubuntu@<backend_elastic_ip> \
-  'cd /opt/cafeteria && sudo git pull && sudo docker compose up -d --build mysql rabbitmq-1 rabbitmq-2 rabbitmq-3 ms-productos ms-inventario ms-pedidos ms-clientes ms-pagos ms-empleados ms-proveedores ms-reportes ms-notificaciones ms-rabbitmq-admin bff-gateway'
+ssh -i labsuser.pem ubuntu@<backend_elastic_ip> 'sudo systemctl restart cafeteria'
 
 ssh -i labsuser.pem ubuntu@<frontend_elastic_ip> \
   'cd /opt/cafeteria && sudo git pull && sudo docker compose up -d --build --no-deps frontend'
@@ -94,9 +114,14 @@ ssh -i labsuser.pem ubuntu@<frontend_elastic_ip> \
 ### Validar sin credenciales de AWS (CI o antes de pedirlas)
 
 ```bash
+terraform fmt -recursive
 terraform init -backend=false
 terraform validate
-terraform fmt -check
+
+# Compose por host, con el .env de ejemplo (desde la raíz del repo):
+for f in kafka rabbitmq apps; do
+  docker compose -f deploy/aws/docker-compose.$f.yml --env-file deploy/aws/.env.example config -q
+done
 ```
 
 ### Al terminar el semestre (o cada vez que cierres la sesión del Lab)
@@ -118,7 +143,8 @@ dos workflows son los que preparan o aplican la infraestructura real en AWS:
 
 | Workflow | Qué hace |
 |---|---|
-| `terraform-deploy.yml` | **Etapa 1** — `terraform plan` + `apply` contra AWS: crea/actualiza las 2 EC2 (backend y frontend), el volumen EBS de MySQL y el API Gateway. **Etapa 2** (automática, no es un paso de este workflow) — cada EC2, al arrancar, corre sola `docker compose up --build`: la de backend levanta MySQL + RabbitMQ + los 9 microservicios + bff-gateway; la de frontend levanta nginx. Pide confirmar la rama que la EC2 va a clonar (`repo_branch`, por defecto `deploy`) y, opcionalmente, `replace_target` (ej. `aws_instance.backend`) para forzar el reemplazo de un recurso puntual sin tocar el resto. Publica los outputs (IPs, URLs) en el resumen del job. |
+| `build-images.yml` | En cada push a `main` o `deploy` que toque el backend (o a mano): compila los 13 servicios **una sola vez** (`mvnw package` del reactor) y publica una imagen única en `ghcr.io/<owner>/cafeteria-backend` con tags `<rama>`, `sha-<sha>` y `latest`. Cada contenedor elige su servicio con la variable `MODULE` (`Dockerfile.runtime`). |
+| `terraform-deploy.yml` | **Etapa 1** — `terraform plan` + `apply` contra AWS: crea/actualiza las 4 EC2, el volumen EBS de MySQL y el API Gateway. **Etapa 2** (automática, no es un paso de este workflow) — cada EC2, al arrancar, levanta su compose: kafka y rabbitmq sus clusters, backend MySQL + los 13 servicios con la imagen de GHCR (sin compilar), frontend nginx. Inputs: `repo_branch` (por defecto `deploy`), `backend_image_tag` (por defecto `deploy`) y, opcionalmente, `replace_target` (ej. `aws_instance.backend`) para forzar el reemplazo de un recurso puntual. Publica los outputs (IPs, URLs) en el resumen del job. |
 | `terraform-destroy.yml` | `terraform destroy`. Pide escribir literalmente `destruir` en el input `confirmar` para evitar un click accidental. |
 
 Los dos son **solo con disparo manual** (`workflow_dispatch`), no en cada
@@ -131,25 +157,25 @@ veces y además re-aplicaría infraestructura real sin que nadie lo pidiera —
 no es una limitación del pipeline, es una decisión deliberada por las
 restricciones del Learner Lab.
 
-| Workflow | Qué hace |
-|---|---|
-| `terraform-deploy.yml` | `terraform plan` + `apply` contra AWS. Pide confirmar la rama que la EC2 va a clonar (`repo_branch`, por defecto `deploy`) y, opcionalmente, `replace_target` (ej. `aws_instance.backend`) para forzar el reemplazo de un recurso puntual sin tocar el resto. Publica los outputs (IP, URLs) en el resumen del job. |
-| `terraform-destroy.yml` | `terraform destroy`. Pide escribir literalmente `destruir` en el input `confirmar` para evitar un click accidental. |
-
 ### Cómo correrlos
 
-1. **Cada vez que arranques el AWS Academy Learner Lab**: "AWS Details" →
+1. **Push a `deploy`** (o `main`): `build-images.yml` construye y publica la
+   imagen del backend. Espera a que termine (pestaña Actions) antes del deploy.
+2. **Una sola vez**: GitHub → tu perfil → **Packages** → `cafeteria-backend` →
+   **Package settings** → **Change visibility** → **Public**. Así la EC2 hace
+   `pull` sin login. Si prefieres dejarlo privado, crea el secret
+   `GHCR_TOKEN` con un token personal (PAT) que tenga permiso `read:packages`.
+3. **Cada vez que arranques el AWS Academy Learner Lab**: "AWS Details" →
    copia `aws_access_key_id`, `aws_secret_access_key` y `aws_session_token` →
    actualiza los secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` y
    `AWS_SESSION_TOKEN` del repo (Settings → Secrets and variables → Actions).
    Son temporales: si el workflow falla con un error de autenticación, es
    casi siempre porque el token ya venció.
-2. Pestaña **Actions** → elige "Terraform - Deploy a AWS (Academy Lab)" →
-   **Run workflow** → elige la rama del propio workflow (da igual, el código
-   que se despliega en la EC2 es el de `repo_branch`) y el valor de
-   `repo_branch` (por defecto `deploy`; asegurate de haber pusheado esa rama
-   antes).
-3. Para apagar todo: "Terraform - Destruir infraestructura AWS" → **Run
+4. Pestaña **Actions** → elige "Terraform - Deploy a AWS (Academy Lab)" →
+   **Run workflow** → `repo_branch` (por defecto `deploy`) y
+   `backend_image_tag` (por defecto `deploy`, la imagen de esa rama).
+   Tiempos esperados: backend 3–5 min, kafka unos 2 min, rabbitmq 1–2 min.
+5. Para apagar todo: "Terraform - Destruir infraestructura AWS" → **Run
    workflow** → escribe `destruir` en el campo de confirmación.
 
 ### Secrets necesarios en el repo
@@ -163,6 +189,7 @@ restricciones del Learner Lab.
 | `AZURE_JWK_SET_URI`, `AZURE_AUTHORITY` | solo tenants External ID (ciamlogin); dejalos vacíos si no aplica |
 | `DB_PASSWORD`, `RABBITMQ_PASSWORD`, `RABBITMQ_ERLANG_COOKIE` | passwords de MySQL y RabbitMQ |
 | `ENABLE_RECOVERY_ALARMS` | opcional, default `true` |
+| `GHCR_TOKEN` | opcional — solo si el package `cafeteria-backend` de GHCR es privado: PAT con permiso `read:packages` |
 | `DUCKDNS_DOMAIN`, `DUCKDNS_TOKEN` | opcionales — dominio completo (ej. `cafegestion360.duckdns.org`) y token de una cuenta gratuita en [duckdns.org](https://www.duckdns.org). Si están, la URL del frontend (y el redirect de Azure, y el CORS del backend) queda fija en ese dominio en vez de la Elastic IP — necesario porque el Learner Lab puede darte una Elastic IP (o hasta una cuenta de AWS) nueva en cada sesión. El workflow actualiza el registro DNS a la IP actual después de cada `apply`. Vacíos = se sigue usando la Elastic IP directamente. |
 
 `repo_url` **no** es un secret: el workflow lo arma solo con
@@ -185,13 +212,22 @@ automáticamente a partir del Account ID de las credenciales que le pasaste.
   detecta (ya tiene filesystem, no lo reformatea) y lo vuelve a montar con
   los datos intactos. Sin esto, cada reemplazo de instancia dejaba la base de
   datos vacía.
-- **Dos instancias, sin Elastic Load Balancer ni Auto Scaling**: backend y
-  frontend separados (frontend liviano en `t3.micro`, backend con todo el
-  peso de las JVM en `t3.large`) alcanza para la demo y evita costos/roles
-  IAM extra que el Learner Lab no permite crear. El frontend no depende de
-  tener al backend arrancado para construirse ni para arrancar (le habla por
-  HTTP al API Gateway en tiempo de ejecución, nunca en build time), así que
-  las dos instancias se pueden crear/reemplazar de forma independiente.
+- **Cuatro instancias, sin Elastic Load Balancer ni Auto Scaling**: Kafka y
+  RabbitMQ en EC2 propias (t3.medium cada una) para que no compitan por
+  memoria con las 13 JVM del backend (t3.large, el máximo del Learner Lab).
+  El backend recibe las IP privadas de las dos en su `user_data`; como esas
+  IP no cambian al detener/iniciar, no hace falta tocar nada entre sesiones.
+  Reemplazar la EC2 de kafka o rabbitmq cambia su IP privada y, por lo tanto,
+  el `user_data` del backend: Terraform recrea también el backend.
+- **Imagen compilada en GitHub Actions**: antes cada arranque del backend
+  compilaba los 13 módulos con Maven en la propia EC2 (10–15 min). Ahora
+  `build-images.yml` compila una vez y la EC2 solo hace `pull`. El
+  `Dockerfile` multi-stage sigue siendo el del desarrollo local.
+- **`esperar-brokers.sh`**: las cuatro EC2 arrancan en paralelo y
+  ms-antifraude (Kafka Streams) falla si arranca sin brokers, así que
+  `cafeteria.service` espera (máximo 10 min, con `nc -z`) a los 3 puertos de
+  Kafka y los 3 de RabbitMQ antes de levantar las apps. Si no responden, el
+  servicio falla y systemd lo reintenta cada 30 s.
 - **`X-Origin-Verify`**: el secreto lo genera Terraform (`random_password`) y
   lo inyecta el API Gateway en cada petición (parameter mapping de la
   integración HTTP_PROXY, solo soportado con `payload_format_version = "1.0"`)
@@ -216,9 +252,10 @@ automáticamente a partir del Account ID de las credenciales que le pasaste.
   alarma `aws:recover`/`aws:reboot`; si `terraform apply` falla en
   `monitoring.tf`, pon esta variable en `false` y vuelve a aplicar.
 - **systemd en vez de `restart` de Docker a secas**: el Learner Lab apaga la
-  instancia al cerrar la sesión del lab. `cafeteria.service` (habilitado con
-  `systemctl enable`) hace `docker compose up -d --build` en cada arranque,
-  así que al reabrir el lab todo vuelve a subir solo, con la misma Elastic IP.
+  instancia al cerrar la sesión del lab. Cada EC2 tiene su servicio
+  (`cafeteria`, `cafeteria-kafka`, `cafeteria-rabbitmq`, habilitados con
+  `systemctl enable`) que hace `docker compose up -d` en cada arranque, así
+  que al reabrir el lab todo vuelve a subir solo, con las mismas Elastic IP.
 - **Backend S3 + DynamoDB en vez de state local**: necesario para que
   GitHub Actions (runners efímeros, sin disco persistente entre corridas) y
   tu máquina local compartan el mismo state. El nombre del bucket incluye el
