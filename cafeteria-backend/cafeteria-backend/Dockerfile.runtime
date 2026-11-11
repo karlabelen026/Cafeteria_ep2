@@ -1,0 +1,17 @@
+# Imagen unica de runtime para los 13 servicios del backend, publicada en GHCR
+# por .github/workflows/build-images.yml. Los .jar ya vienen compilados (el
+# workflow corre "mvnw package" una sola vez para todo el reactor y los deja
+# en jars/), asi que la EC2 solo hace "docker pull": no compila nada.
+# Cada contenedor elige su servicio con la variable de entorno MODULE (ver
+# deploy/aws/docker-compose.apps.yml). El Dockerfile multi-stage de esta misma
+# carpeta sigue siendo el del desarrollo local (docker-compose.yml de la raiz).
+
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+# Los productores de Kafka comprimen con snappy, cuya libreria nativa esta
+# compilada contra glibc: Alpine usa musl, asi que se agrega la capa de
+# compatibilidad (sin esto: "Could not initialize class org.xerial.snappy.Snappy").
+RUN apk add --no-cache gcompat libstdc++
+COPY jars/*.jar /app/
+ENV MODULE=""
+ENTRYPOINT ["sh", "-c", "if [ -z \"$MODULE\" ]; then echo 'Falta la variable MODULE (ej. MODULE=ms-pedidos)' >&2; exit 1; fi; exec java -jar \"/app/$MODULE.jar\""]
