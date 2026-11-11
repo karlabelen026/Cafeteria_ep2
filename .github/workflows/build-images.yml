@@ -38,7 +38,7 @@ jobs:
           java-version: "17"
           cache: maven
 
-      - name: mvnw package (reactor completo, sin pruebas: ya las corre ci.yml)
+      - name: "mvnw package (reactor completo, sin pruebas: ya las corre ci.yml)"
         run: ./mvnw -B -q package -DskipTests
 
       - name: Juntar los .jar de los 13 servicios en jars/
