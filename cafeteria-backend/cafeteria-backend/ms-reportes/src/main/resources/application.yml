@@ -32,6 +32,30 @@ spring:
         acknowledge-mode: manual
         prefetch: 5
         default-requeue-rejected: false
+  # Kafka: ms-reportes consume el topic de transacciones de pago con su propio
+  # consumer group, en paralelo a ms-antifraude, para la reporteria en tiempo
+  # real y la auditoria (ver MetricasTiempoRealService).
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Un consumidor por particion dentro del grupo (se ve en Kafka UI -> Consumers).
+    listener:
+      concurrency: 3
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ErrorHandlingDeserializer envuelve al JsonDeserializer: un JSON invalido
+      # no deja al consumidor en un bucle infinito, el registro va a la DLT.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.value.default.type: cl.duoc.cafeteria.common.evento.TransaccionPagoEvent
+        spring.json.trusted.packages: cl.duoc.cafeteria.common.evento
+        spring.json.use.type.headers: false
+    # Solo se usa para publicar en la DLT.
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
 
 server:
   port: 8088
@@ -61,3 +85,25 @@ app:
       message-ttl-ms: 600000
       max-length: 10000
       dlq-ttl-ms: 86400000
+  # Topics de Kafka. Nombres, grupos y reintentos SOLO aqui (KafkaTopicsProperties
+  # + KafkaReportesConfig), igual que app.rabbitmq.
+  kafka:
+    topics:
+      # Lo crea ms-pagos (su productor); aqui solo se consume.
+      transacciones: cafeteria.pagos.transacciones
+      transacciones-dlt: cafeteria.pagos.transacciones.reportes.DLT
+    group-ids:
+      # Grupo propio: recibe TODAS las transacciones aunque ms-antifraude
+      # tambien las lea con el suyo (cafeteria-antifraude).
+      reportes: reportes-tiempo-real
+    # La DLT tiene las mismas particiones que el topic principal: el registro
+    # fallido va a la misma particion de la que vino.
+    particiones: 3
+    replicas: 3
+    min-insync-replicas: 2
+    retencion-ms:
+      transacciones-dlt: 1209600000   # 14 dias para revisar los registros fallidos
+    reintentos:
+      intervalo-inicial-ms: 1000
+      multiplicador: 2.0
+      maximo: 3                        # reintentos a los 1s, 2s y 4s

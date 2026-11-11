@@ -560,6 +560,13 @@ services:
         condition: service_completed_successfully
       rabbitmq-1:
         condition: service_healthy
+      # Consume cafeteria.pagos.transacciones para la reporteria en tiempo real.
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8088/actuator/health"]
       interval: 10s

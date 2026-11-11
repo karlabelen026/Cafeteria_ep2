@@ -10,6 +10,8 @@ import {
   YAxis,
 } from 'recharts';
 import ResourcePage from '../components/ResourcePage';
+import TiempoRealKafka from '../components/TiempoRealKafka';
+import { useAuthProfile } from '../hooks/useUserRole';
 
 const CLP = (n) => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
 
@@ -169,6 +171,9 @@ function resumen(ventas) {
 }
 
 export default function Reportes() {
+  const { role } = useAuthProfile();
+  // El tiempo real (Kafka) es solo para ADMIN y GERENTE; CAJERO ve las ventas diarias.
+  const veTiempoReal = role === 'ADMIN' || role === 'GERENTE';
   return (
     <ResourcePage
       title="Reportes"
@@ -176,7 +181,12 @@ export default function Reportes() {
       endpoint="/reportes"
       emptyTitle="Todavía no hay reportes generados"
       emptyText="Registra ventas diarias desde el backend para ver el resumen aquí."
-      renderAbove={(ventas) => (ventas.length ? resumen(ventas) : null)}
+      renderAbove={(ventas) => (
+        <>
+          {veTiempoReal && <TiempoRealKafka />}
+          {ventas.length ? resumen(ventas) : null}
+        </>
+      )}
       columns={[
         { key: 'fecha', label: 'Fecha', render: (v) => <strong>{v.fecha}</strong> },
         { key: 'totalVentas', label: 'Ventas del día', render: (v) => `$${v.totalVentas}` },
