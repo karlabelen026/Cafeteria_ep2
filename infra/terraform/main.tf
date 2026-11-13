@@ -118,8 +118,11 @@ resource "aws_security_group" "kafka" {
 }
 
 resource "aws_security_group" "rabbitmq" {
-  name        = "cafeteria360-rabbitmq-sg"
-  description = "CafeGestion360 RabbitMQ (3 nodos): AMQP solo desde el backend; management con login; SSH solo desde mi IP"
+  name = "cafeteria360-rabbitmq-sg"
+  # La descripcion no se puede cambiar sin reemplazar el SG (y AWS no deja
+  # borrarlo mientras la EC2 lo usa): se deja la original aunque el management
+  # ya se abra a ui_allowed_cidrs (ver la regla de 15672).
+  description = "CafeGestion360 RabbitMQ (3 nodos): AMQP solo desde el backend; SSH y management desde mi IP"
 
   ingress {
     description = "SSH"
