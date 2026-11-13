@@ -1,4 +1,4 @@
-# CafeGestión360 — DSY1107 Desarrollo Cloud Native I — Evaluación Parcial 2
+# CafeGestión360 — DSY1107 Desarrollo Cloud Native I — Evaluación Parcial 3 (Kafka + RabbitMQ)
 
 Sistema de gestión para una cafetería: tienda pública con carrito y pago, y un portal interno por
 roles (pedidos, inventario, recetas, clientes, pagos, empleados, proveedores, reportes, alertas y chat).
@@ -286,6 +286,74 @@ evento repetido no se cuenta dos veces) con la partición y el offset de donde s
 
 La página **Reportes** muestra la tarjeta "Tiempo real (Kafka)", que se refresca cada 5 segundos.
 
+### Casos de uso y modelo de eventos
+
+**Caso 1 — Antifraude.** ms-pagos publica cada pago en `cafeteria.pagos.transacciones`; Kafka Streams
+(ms-antifraude, consumer group `cafeteria-antifraude`) lo filtra, enriquece, agrega por cliente y por
+ventana de tiempo, y emite a `alertas-fraude`. Ese topic lo leen dos grupos independientes:
+`notificaciones-antifraude` (ms-notificaciones, alerta en el dashboard) y `antifraude-monitor`
+(ms-antifraude, últimas alertas de su página). El topic de transacciones retiene 7 días, así que se puede
+hacer *replay*: reiniciar los offsets de un grupo (ver `reset-offsets` más abajo) y volver a procesar el
+historial.
+
+**Caso 2 — Reportería y auditoría.** El mismo topic de transacciones lo lee un tercer grupo,
+`reportes-tiempo-real` (ms-reportes), que guarda cada transacción en la tabla `auditoria_transacciones`
+con la partición y el offset de donde se leyó, y calcula las métricas en tiempo real.
+
+`TransaccionPagoEvent` (topic `cafeteria.pagos.transacciones`, key = email del cliente), copiado del
+topic en local:
+
+```json
+{"eventId":"7dccdb0a-478f-4cfa-8bd6-6d465cf1dbef","ocurridoEn":1794363757.242989894,"version":1,
+ "pedidoId":26,"pagoId":26,"clienteEmail":"reportes@cafegestion360.cl","monto":3200.0,
+ "metodoPago":"CREDITO","aprobado":true}
+```
+
+| Campo | Por qué está |
+|---|---|
+| key del mensaje (`clienteEmail`) | Todas las transacciones de un cliente caen en la misma partición: Kafka garantiza su orden, y Kafka Streams puede sumar y contar por cliente sin mezclar particiones. Sin email se usa `mostrador`. |
+| `eventId` | Idempotencia: es la clave primaria de `auditoria_transacciones`, así que un mensaje repetido (reintento o *replay*) no se cuenta dos veces. |
+| `ocurridoEn` | Hora del pago (segundos desde 1970, con nanosegundos). Ordena la serie por minuto y permite medir la latencia hasta que el consumidor lo registra. |
+| `version` | Versión del esquema: si mañana cambia un campo, los consumidores pueden distinguir el formato viejo del nuevo sin romperse. |
+| `pedidoId`, `pagoId` | Trazabilidad: unen el evento con el pedido y el pago en las bases de ms-pedidos y ms-pagos. |
+| `clienteEmail` | A quién se le atribuye el gasto en el total por cliente y en la auditoría. |
+| `monto` | Base de las reglas de fraude (montos altos) y de los totales de reportería. Nunca viaja el número de tarjeta ni el CVV. |
+| `metodoPago` | Origen de la transacción: permite el desglose por método en la reportería. |
+| `aprobado` | Separa aprobadas de rechazadas: un rechazo genera alerta MEDIA y no suma al monto aprobado. |
+
+`AlertaFraudeEvent` (topic `alertas-fraude`, key = cliente), copiado del topic en local:
+
+```json
+{"eventId":"4f54775f-c4a2-462c-a43b-f57f171c3a37","detectadaEn":1793404406.213280497,
+ "cliente":"prueba@cafegestion360.cl","severidad":"MEDIA",
+ "motivo":"Ráfaga de pagos: 6 transacciones en 5 minutos","monto":0.0,"montoUsd":0.0,
+ "metodoPago":null,"pagoId":null}
+```
+
+| Campo | Por qué está |
+|---|---|
+| key del mensaje (`cliente`) | Las alertas de un cliente quedan ordenadas en una misma partición. |
+| `eventId` | Idempotencia en ms-notificaciones: una alerta repetida no se muestra dos veces. |
+| `detectadaEn` | Cuándo la detectó Kafka Streams; ordena la lista de alertas. |
+| `cliente` | A quién revisar. |
+| `severidad` | `ALTA` (monto sobre el umbral) o `MEDIA` (pago rechazado o ráfaga); se valida con `@Pattern`. |
+| `motivo` | Texto que se muestra en el dashboard, con la regla que se disparó. |
+| `monto`, `montoUsd` | Monto del pago y su conversión (paso de enriquecimiento). En una alerta de ráfaga valen 0. |
+| `metodoPago`, `pagoId` | Contexto del pago que la generó; `null` en las alertas de ráfaga, que vienen de una ventana y no de un pago. |
+
+Configuración real de cada topic (leída del cluster con `kafka-topics --describe`; se declara en el
+`application.yml` del servicio dueño, bloque `app.kafka`):
+
+| Topic | Lo crea | Particiones | Réplicas | min.insync.replicas | retention.ms | cleanup.policy |
+|---|---|---|---|---|---|---|
+| `cafeteria.pagos.transacciones` | ms-pagos | 3 | 3 | 2 | 604800000 (7 días) | delete |
+| `alertas-fraude` | ms-antifraude | 3 | 3 | 2 | 2592000000 (30 días) | delete |
+| `cafeteria.antifraude.totales-por-cliente` | ms-antifraude | 3 | 3 | 2 | — (se conserva el último valor por cliente) | compact |
+| `alertas-fraude.DLT` | ms-notificaciones | 3 | 3 | 2 | 1209600000 (14 días) | delete |
+| `cafeteria.pagos.transacciones.reportes.DLT` | ms-reportes | 3 | 3 | 2 | 1209600000 (14 días) | delete |
+| `cafeteria-antifraude-total-por-cliente-changelog` | Kafka Streams | 3 | 3 | 2 | — | compact |
+| `cafeteria-antifraude-pagos-por-ventana-changelog` | Kafka Streams | 3 | 3 | 2 | 86700000 (ventana + margen) | compact,delete |
+
 ### Kafka y RabbitMQ en este proyecto
 
 | | RabbitMQ | Kafka |
@@ -364,6 +432,7 @@ en `KafkaAdminService`. Documentación interactiva en http://localhost:8092/swag
 | DELETE | `/topics/{name}` | Elimina un topic | `deleteTopics` |
 | GET | `/consumer-groups`, `/consumer-groups/{id}` | Lista grupos; el detalle trae miembros, particiones asignadas, offsets y lag | `listConsumerGroups`, `describeConsumerGroups`, `listConsumerGroupOffsets`, `listOffsets` |
 | DELETE | `/consumer-groups/{id}` | Elimina un grupo sin consumidores activos (409 si está activo) | `deleteConsumerGroups` |
+| POST | `/consumer-groups/{id}/reset-offsets` | Mueve los offsets del grupo en un topic: `EARLIEST` (replay de lo retenido), `LATEST` (saltar lo pendiente) o `TIMESTAMP` (desde una fecha). 409 si el grupo tiene consumidores activos, 404 si el grupo o el topic no existen, 400 si falta `timestamp` | `describeConsumerGroups`, `listOffsets`, `alterConsumerGroupOffsets` |
 | GET | `/cluster` | Brokers y cuál es el controlador | `describeCluster` |
 
 Reglas (bloque `app.kafka-admin` del `application.yml`):
@@ -386,10 +455,15 @@ curl -H "$AUTH" -H "$JSON" -X POST $K/topics/demo.pedidos/partitions -d '{"total
 curl -H "$AUTH" $K/consumer-groups/notificaciones-antifraude                                     # miembros, offsets y lag
 curl -H "$AUTH" -X DELETE $K/topics/demo.pedidos                                                 # 204
 curl -H "$AUTH" -X DELETE $K/topics/alertas-fraude                                               # 409, protegido
+
+# Replay: detener el consumidor, volver el grupo al inicio y arrancarlo de nuevo
+docker stop ms-reportes
+curl -H "$AUTH" -H "$JSON" -X POST $K/consumer-groups/reportes-tiempo-real/reset-offsets      -d '{"topic":"cafeteria.pagos.transacciones","to":"EARLIEST"}'                            # 200, offset anterior y nuevo
+docker start ms-reportes   # relee todo; la auditoria no duplica (idempotencia por eventId)
 ```
 
 Lo mismo por línea de comandos: `./scripts/kafka-topics.sh` (`listar`, `describir`, `crear`, `config`,
-`particiones`, `eliminar`, `grupos`, `grupo`).
+`particiones`, `eliminar`, `grupos`, `grupo`, `reset <grupo> <topic> [--to-earliest|--to-latest]`).
 
 ### Demostrar la tolerancia a fallos
 
@@ -526,7 +600,7 @@ curl -X POST http://localhost:8080/api/public/checkout -H "Content-Type: applica
 #   GET /api/public/tickets/{codigo}   boleta
 ```
 
-Colección de Postman: [`docs/postman`](docs/postman).
+Colección de Postman: [`docs/postman`](docs/postman) — `CafeGestion360_EP3.postman_collection.json` y su environment `CafeGestion360_EP3.postman_environment.json` (incluye las carpetas de Kafka: antifraude, administración con reset de offsets y reportería en tiempo real).
 
 ---
 
@@ -548,7 +622,7 @@ docker-compose.yml                     stack completo
 
 ## 11. Limitaciones conocidas
 
-- La pauta pide el frontend en Angular; este proyecto usa React + Vite, decisión heredada de la EP1.
+- El frontend es React + Vite (acordado con el docente desde la EP1).
 - La base `cafeteria` de MySQL de versiones anteriores queda sin uso; no se borra automáticamente.
 - El pago es una simulación con fines académicos.
 - Kafka y RabbitMQ tienen su propia EC2, separada del backend, pero sus 3 nodos comparten esa máquina:

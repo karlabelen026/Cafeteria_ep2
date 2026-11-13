@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "a1e2c3d4-cafe-4e21-9a36-cafegestion360",
-    "name": "CafeGestion360 EP2",
+    "name": "CafeGestion360 EP3",
     "description": "Pruebas funcionales de docs/EP2_PLAN.md sección 11 (seguridad + mensajería). Requiere SPRING_PROFILES_ACTIVE vacío (Azure real) para que S2-S6/S8 tengan sentido: con el perfil 'noauth' todo queda permitAll y esas pruebas no aplican. Completa los tokens (adminToken, baristaToken, etc.) en el Environment pegando un access token válido de cada usuario de prueba (ver docs/EP2_PLAN.md sección 7, paso 11: verificalos antes en https://jwt.ms).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -1737,6 +1737,329 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KA16 - POST reset-offsets de un grupo activo -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kafka/consumer-groups/reportes-tiempo-real/reset-offsets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kafka",
+                "consumer-groups",
+                "reportes-tiempo-real",
+                "reset-offsets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"topic\": \"cafeteria.pagos.transacciones\", \"to\": \"EARLIEST\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Con ms-reportes corriendo el grupo esta activo: Kafka no deja mover sus offsets.",
+                  "// Con ms-reportes detenido (docker stop ms-reportes) esta misma peticion responde 200.",
+                  "pm.test('409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('Pide detener los consumidores', function () {",
+                  "  pm.expect(pm.response.json().message).to.include('Detén los consumidores');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KA17 - POST reset-offsets a TIMESTAMP sin timestamp -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kafka/consumer-groups/reportes-tiempo-real/reset-offsets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kafka",
+                "consumer-groups",
+                "reportes-tiempo-real",
+                "reset-offsets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"topic\": \"cafeteria.pagos.transacciones\", \"to\": \"TIMESTAMP\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', function () { pm.response.to.have.status(400); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KA18 - POST reset-offsets de un grupo inexistente -> 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/kafka/consumer-groups/no-existe/reset-offsets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "kafka",
+                "consumer-groups",
+                "no-existe",
+                "reset-offsets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"topic\": \"cafeteria.pagos.transacciones\", \"to\": \"EARLIEST\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Kafka - Reportería y auditoría (ms-reportes)",
+      "description": "El grupo reportes-tiempo-real consume cafeteria.pagos.transacciones. Pagar un pedido antes de R1/R2 para tener datos. ADMIN o GERENTE.",
+      "item": [
+        {
+          "name": "R1 - GET tiempo real (15 minutos)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reportes/tiempo-real?minutos=15",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reportes",
+                "tiempo-real"
+              ],
+              "query": [
+                {
+                  "key": "minutos",
+                  "value": "15"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Trae totales y la serie por minuto', function () {",
+                  "  const m = pm.response.json();",
+                  "  pm.expect(m).to.have.property('totalTransacciones');",
+                  "  pm.expect(m).to.have.property('aprobadas');",
+                  "  pm.expect(m.serie).to.be.an('array').with.lengthOf(15);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "R2 - GET auditoría de transacciones",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reportes/auditoria/transacciones?limite=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reportes",
+                "auditoria",
+                "transacciones"
+              ],
+              "query": [
+                {
+                  "key": "limite",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Cada registro trae particion y offset de Kafka', function () {",
+                  "  const filas = pm.response.json();",
+                  "  pm.expect(filas).to.be.an('array');",
+                  "  filas.forEach(function (f) {",
+                  "    pm.expect(f).to.have.property('particion');",
+                  "    pm.expect(f).to.have.property('offset');",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "R3 - GET auditoría de un cliente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reportes/auditoria/transacciones?cliente=juan@mail.cl",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reportes",
+                "auditoria",
+                "transacciones"
+              ],
+              "query": [
+                {
+                  "key": "cliente",
+                  "value": "juan@mail.cl"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Solo transacciones de ese cliente', function () {",
+                  "  pm.response.json().forEach(function (f) { pm.expect(f.clienteEmail).to.eql('juan@mail.cl'); });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "R4 - GET tiempo real con minutos=0 -> se corrige a 1",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reportes/tiempo-real?minutos=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reportes",
+                "tiempo-real"
+              ],
+              "query": [
+                {
+                  "key": "minutos",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('ventanaMinutos = 1', function () { pm.expect(pm.response.json().ventanaMinutos).to.eql(1); });"
                 ]
               }
             }

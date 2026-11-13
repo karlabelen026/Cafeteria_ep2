@@ -5,6 +5,8 @@ import cl.duoc.cafeteria.kafkaadmin.dto.ClusterResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.ConsumerGroupDetailResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.ConsumerGroupResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.CreateTopicRequest;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsRequest;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.TopicDetailResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.TopicResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.UpdateTopicConfigRequest;
@@ -97,6 +99,14 @@ public class KafkaAdminController {
     public ResponseEntity<Void> eliminarGrupo(@PathVariable String groupId) {
         service.eliminarGrupo(groupId);
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Mueve los offsets de un grupo detenido en un topic: EARLIEST (replay), LATEST o TIMESTAMP "
+            + "(409 si el grupo tiene consumidores activos)")
+    @PostMapping("/consumer-groups/{groupId}/reset-offsets")
+    public ResetOffsetsResponse resetearOffsets(@PathVariable String groupId,
+            @Valid @RequestBody ResetOffsetsRequest request) {
+        return service.resetearOffsets(groupId, request);
     }
 
     @Operation(summary = "Brokers del cluster y cual es el controlador")

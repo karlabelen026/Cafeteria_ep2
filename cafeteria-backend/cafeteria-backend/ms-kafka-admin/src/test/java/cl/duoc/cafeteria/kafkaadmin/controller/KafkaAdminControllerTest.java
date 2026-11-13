@@ -143,4 +143,25 @@ class KafkaAdminControllerTest {
 
         mockMvc.perform(get("/api/kafka/consumer-groups/no-existe")).andExpect(status().isNotFound());
     }
+
+    @Test
+    @WithMockUser(authorities = "ADMIN")
+    void resetearOffsets_sinTopicNiDestino_retorna400SinLlamarAlService() throws Exception {
+        mockMvc.perform(post("/api/kafka/consumer-groups/reportes-tiempo-real/reset-offsets")
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    @WithMockUser(authorities = "ADMIN")
+    void resetearOffsets_grupoActivo_retorna409() throws Exception {
+        when(service.resetearOffsets(any(), any()))
+                .thenThrow(new ConflictoDeNegocioException("Detén los consumidores del grupo antes de resetear sus offsets"));
+
+        mockMvc.perform(post("/api/kafka/consumer-groups/reportes-tiempo-real/reset-offsets")
+                        .contentType("application/json")
+                        .content("{\"topic\":\"cafeteria.pagos.transacciones\",\"to\":\"EARLIEST\"}"))
+                .andExpect(status().isConflict());
+    }
 }
