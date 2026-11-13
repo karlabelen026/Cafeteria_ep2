@@ -423,8 +423,9 @@ api "carga?cantidad=10000"                                                      
    cada pago en Kafka.
 
 En local, Kafka UI queda en http://localhost:8095. En AWS, en `http://<IP_kafka>:8095` (output
-`kafka_ui_url`), abierto solo para tu IP (`MY_IP_CIDR`); los puertos 9092–9094 de los brokers solo
-aceptan conexiones desde la EC2 de backend.
+`kafka_ui_url`): se abre desde cualquier red y pide usuario `cafeteria` y la clave `RABBITMQ_PASSWORD`,
+igual que el panel de RabbitMQ. Los puertos 9092–9094 de los brokers solo aceptan conexiones desde la
+EC2 de backend.
 
 ---
 
@@ -494,7 +495,7 @@ R=<usuario>/<repositorio>
 gh secret set AWS_ACCESS_KEY_ID -R $R
 gh secret set AWS_SECRET_ACCESS_KEY -R $R
 gh secret set AWS_SESSION_TOKEN -R $R
-gh secret set MY_IP_CIDR -R $R --body "<tu-ip>/32"    # SSH y panel de RabbitMQ solo desde tu IP
+gh secret set MY_IP_CIDR -R $R --body "<tu-ip>/32"    # SSH solo desde tu IP (los paneles piden clave)
 
 git push origin <rama>:deploy                        # publica la imagen (build-images.yml)
 gh workflow run terraform-destroy.yml -R $R --ref deploy -f confirmar=destruir   # borra todo, incluida la base

@@ -12,6 +12,8 @@ iam_instance_profile      = "LabInstanceProfile"
 
 # Tu IP pública (https://whatismyip.com) en formato CIDR, p.ej. "190.123.45.67/32"
 my_ip_cidr = "<TU_IP>/32"
+# Desde donde se abren los paneles de RabbitMQ y Kafka UI (los dos piden clave).
+ui_allowed_cidrs = ["0.0.0.0/0"]
 
 repo_url    = "https://github.com/<tu-usuario>/cafeteria.git"
 repo_branch = "main"

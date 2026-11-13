@@ -19,22 +19,22 @@ output "api_gateway_url" {
 }
 
 output "rabbitmq_dashboard_url" {
-  description = "UI de administración de RabbitMQ del nodo 1, en la EC2 de RabbitMQ (solo accesible desde my_ip_cidr)."
+  description = "UI de administración de RabbitMQ del nodo 1, en la EC2 de RabbitMQ (usuario cafeteria y RABBITMQ_PASSWORD)."
   value       = "http://${aws_eip.rabbitmq.public_ip}:15672"
 }
 
 output "kafka_ui_url" {
-  description = "Kafka UI (topics, consumer groups y lag), en la EC2 de Kafka. Solo accesible desde my_ip_cidr."
+  description = "Kafka UI (topics, consumer groups y lag), en la EC2 de Kafka (usuario cafeteria y RABBITMQ_PASSWORD)."
   value       = "http://${aws_eip.kafka.public_ip}:8095"
 }
 
 output "kafka_elastic_ip" {
-  description = "IP pública fija de la EC2 de Kafka (solo para Kafka UI y SSH desde my_ip_cidr)."
+  description = "IP pública fija de la EC2 de Kafka (Kafka UI y SSH)."
   value       = aws_eip.kafka.public_ip
 }
 
 output "rabbitmq_elastic_ip" {
-  description = "IP pública fija de la EC2 de RabbitMQ (solo para el management y SSH desde my_ip_cidr)."
+  description = "IP pública fija de la EC2 de RabbitMQ (management y SSH)."
   value       = aws_eip.rabbitmq.public_ip
 }
 

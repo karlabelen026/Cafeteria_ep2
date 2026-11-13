@@ -13,7 +13,9 @@ Crea **cuatro** EC2 (Ubuntu 22.04) con Docker Compose, más un API Gateway
 Los microservicios llegan a Kafka y RabbitMQ por **IP privada** (no cambia al
 detener/iniciar las instancias); sus Security Groups solo aceptan los puertos
 de los brokers desde el SG de backend. Las UIs (Kafka UI 8095, RabbitMQ 15672)
-y SSH quedan abiertos solo a `my_ip_cidr`. El frontend nunca le
+se abren desde cualquier IP (`ui_allowed_cidrs`), para poder mostrarlas desde
+otra red como la del Duoc, y las dos piden usuario `cafeteria` y la clave
+`RABBITMQ_PASSWORD`. SSH queda abierto solo a `my_ip_cidr`. El frontend nunca le
 habla a la instancia de backend directamente: siempre pasa por el API
 Gateway (`VITE_API_BASE_URL`). Pensado para el Learner Lab: usa el key pair
 `vockey` y el `LabInstanceProfile` ya existentes, y no crea ningún rol ni
@@ -78,7 +80,8 @@ Después del `apply`:
    certificado autofirmado (es autofirmado a propósito, no hay dominio
    propio).
 3. UI de RabbitMQ: `terraform output rabbitmq_dashboard_url`; Kafka UI:
-   `terraform output kafka_ui_url` (las dos solo visibles desde tu IP).
+   `terraform output kafka_ui_url`. Las dos se abren desde cualquier red y
+   piden usuario `cafeteria` y la clave `RABBITMQ_PASSWORD`.
 4. El frontend y el `.env` del backend ya quedan apuntando al API Gateway
    (`terraform output api_gateway_url`): no hace falta tocar nada a mano.
 

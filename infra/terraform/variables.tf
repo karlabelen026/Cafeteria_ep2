@@ -63,8 +63,14 @@ variable "iam_instance_profile" {
 }
 
 variable "my_ip_cidr" {
-  description = "Tu IP pública en formato CIDR (p.ej. \"190.123.45.67/32\"), para restringir SSH (22), la UI de RabbitMQ (15672) y Kafka UI (8095) solo a ti."
+  description = "Tu IP pública en formato CIDR (p.ej. \"190.123.45.67/32\"), para restringir SSH (22) solo a ti."
   type        = string
+}
+
+variable "ui_allowed_cidrs" {
+  description = "Desde donde se puede abrir el panel de RabbitMQ (15672) y Kafka UI (8095). Por defecto cualquier IP, para poder mostrarlos desde otro computador o red (ej. la del Duoc): los dos piden usuario y clave. Para restringirlos, pasa una lista como [\"190.123.45.67/32\"]."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }
 
 variable "repo_url" {
