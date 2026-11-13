@@ -432,6 +432,7 @@ en `KafkaAdminService`. Documentación interactiva en http://localhost:8092/swag
 | DELETE | `/topics/{name}` | Elimina un topic | `deleteTopics` |
 | GET | `/consumer-groups`, `/consumer-groups/{id}` | Lista grupos; el detalle trae miembros, particiones asignadas, offsets y lag | `listConsumerGroups`, `describeConsumerGroups`, `listConsumerGroupOffsets`, `listOffsets` |
 | DELETE | `/consumer-groups/{id}` | Elimina un grupo sin consumidores activos (409 si está activo) | `deleteConsumerGroups` |
+| POST | `/consumer-groups/{id}/reset-offsets` | Mueve los offsets del grupo en un topic: `EARLIEST` (replay de lo retenido), `LATEST` (saltar lo pendiente) o `TIMESTAMP` (desde una fecha). 409 si el grupo tiene consumidores activos, 404 si el grupo o el topic no existen, 400 si falta `timestamp` | `describeConsumerGroups`, `listOffsets`, `alterConsumerGroupOffsets` |
 | GET | `/cluster` | Brokers y cuál es el controlador | `describeCluster` |
 
 Reglas (bloque `app.kafka-admin` del `application.yml`):
@@ -454,10 +455,15 @@ curl -H "$AUTH" -H "$JSON" -X POST $K/topics/demo.pedidos/partitions -d '{"total
 curl -H "$AUTH" $K/consumer-groups/notificaciones-antifraude                                     # miembros, offsets y lag
 curl -H "$AUTH" -X DELETE $K/topics/demo.pedidos                                                 # 204
 curl -H "$AUTH" -X DELETE $K/topics/alertas-fraude                                               # 409, protegido
+
+# Replay: detener el consumidor, volver el grupo al inicio y arrancarlo de nuevo
+docker stop ms-reportes
+curl -H "$AUTH" -H "$JSON" -X POST $K/consumer-groups/reportes-tiempo-real/reset-offsets      -d '{"topic":"cafeteria.pagos.transacciones","to":"EARLIEST"}'                            # 200, offset anterior y nuevo
+docker start ms-reportes   # relee todo; la auditoria no duplica (idempotencia por eventId)
 ```
 
 Lo mismo por línea de comandos: `./scripts/kafka-topics.sh` (`listar`, `describir`, `crear`, `config`,
-`particiones`, `eliminar`, `grupos`, `grupo`).
+`particiones`, `eliminar`, `grupos`, `grupo`, `reset <grupo> <topic> [--to-earliest|--to-latest]`).
 
 ### Demostrar la tolerancia a fallos
 

@@ -10,6 +10,8 @@ import cl.duoc.cafeteria.kafkaadmin.dto.CreateTopicRequest;
 import cl.duoc.cafeteria.kafkaadmin.dto.GroupMemberResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.PartitionLagResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.PartitionResponse;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsRequest;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.TopicDetailResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.TopicResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.UpdateTopicConfigRequest;
@@ -53,6 +55,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -65,8 +68,9 @@ import java.util.stream.Collectors;
 /**
  * Implementa la administracion con AdminClient: createTopics, deleteTopics,
  * describeTopics, incrementalAlterConfigs, createPartitions,
- * listConsumerGroups, describeConsumerGroups, listConsumerGroupOffsets y
- * listOffsets. Cada error de Kafka se traduce a una excepcion de esta API.
+ * listConsumerGroups, describeConsumerGroups, listConsumerGroupOffsets,
+ * listOffsets y alterConsumerGroupOffsets. Cada error de Kafka se traduce a
+ * una excepcion de esta API.
  */
 @Service
 public class KafkaAdminServiceImpl implements KafkaAdminService {
@@ -212,6 +216,49 @@ public class KafkaAdminServiceImpl implements KafkaAdminService {
     }
 
     @Override
+    public ResetOffsetsResponse resetearOffsets(String groupId, ResetOffsetsRequest request) {
+        ResetOffsetsRequest.DestinoOffset destino = request.to();
+        if (destino == ResetOffsetsRequest.DestinoOffset.TIMESTAMP && request.timestamp() == null) {
+            throw new SolicitudInvalidaException("Con to=TIMESTAMP debes indicar timestamp en formato ISO-8601, "
+                    + "p.ej. 2026-11-12T10:00:00Z");
+        }
+
+        ConsumerGroupDescription grupo = esperar(adminClient.describeConsumerGroups(List.of(groupId)).all()).get(groupId);
+        // Para un grupo inexistente Kafka no da error: responde estado DEAD.
+        if (grupo == null || grupo.state() == ConsumerGroupState.DEAD) {
+            throw new RecursoNoEncontradoException("No existe el consumer group '" + groupId + "'");
+        }
+        // Kafka no deja cambiar los offsets de un grupo con consumidores conectados.
+        if (grupo.state() != ConsumerGroupState.EMPTY) {
+            throw new ConflictoDeNegocioException("Detén los consumidores del grupo antes de resetear sus offsets");
+        }
+
+        TopicDescription topic = esperar(adminClient.describeTopics(List.of(request.topic())).allTopicNames())
+                .get(request.topic());
+        List<TopicPartition> particiones = topic.partitions().stream()
+                .map(p -> new TopicPartition(request.topic(), p.partition()))
+                .toList();
+        Map<TopicPartition, Long> nuevos = offsetsDestino(particiones, destino, request);
+
+        Map<TopicPartition, OffsetAndMetadata> anteriores =
+                esperar(adminClient.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata());
+        Map<TopicPartition, OffsetAndMetadata> aplicar = nuevos.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> new OffsetAndMetadata(e.getValue())));
+        esperar(adminClient.alterConsumerGroupOffsets(groupId, aplicar).all());
+
+        List<ResetOffsetsResponse.OffsetReseteado> resultado = particiones.stream()
+                .map(tp -> {
+                    OffsetAndMetadata anterior = anteriores.get(tp);
+                    return new ResetOffsetsResponse.OffsetReseteado(tp.partition(),
+                            anterior != null ? anterior.offset() : null, nuevos.get(tp));
+                })
+                .sorted(Comparator.comparingInt(ResetOffsetsResponse.OffsetReseteado::partition))
+                .toList();
+        log.info("Offsets del grupo {} en el topic {} reseteados a {}: {}", groupId, request.topic(), destino, resultado);
+        return new ResetOffsetsResponse(groupId, request.topic(), destino.toString(), resultado);
+    }
+
+    @Override
     public ClusterResponse estadoCluster() {
         DescribeClusterResult cluster = adminClient.describeCluster();
         Node controlador = esperar(cluster.controller());
@@ -241,6 +288,36 @@ public class KafkaAdminServiceImpl implements KafkaAdminService {
         });
         resultado.sort(Comparator.comparing(PartitionLagResponse::topic).thenComparingInt(PartitionLagResponse::partition));
         return resultado;
+    }
+
+    /**
+     * Offset al que debe quedar cada particion. Con TIMESTAMP, Kafka responde -1
+     * en las particiones sin mensajes desde esa fecha: esas quedan al final,
+     * igual que lo hace kafka-consumer-groups --to-datetime.
+     */
+    private Map<TopicPartition, Long> offsetsDestino(List<TopicPartition> particiones,
+            ResetOffsetsRequest.DestinoOffset destino, ResetOffsetsRequest request) {
+        OffsetSpec spec = switch (destino) {
+            case EARLIEST -> OffsetSpec.earliest();
+            case LATEST -> OffsetSpec.latest();
+            case TIMESTAMP -> OffsetSpec.forTimestamp(request.timestamp().toEpochMilli());
+        };
+        Map<TopicPartition, Long> offsets = consultarOffsets(particiones, spec);
+        List<TopicPartition> sinMensajes = offsets.entrySet().stream()
+                .filter(e -> e.getValue() < 0)
+                .map(Map.Entry::getKey)
+                .toList();
+        if (!sinMensajes.isEmpty()) {
+            offsets.putAll(consultarOffsets(sinMensajes, OffsetSpec.latest()));
+        }
+        return offsets;
+    }
+
+    private Map<TopicPartition, Long> consultarOffsets(List<TopicPartition> particiones, OffsetSpec spec) {
+        Map<TopicPartition, OffsetSpec> consulta = particiones.stream().collect(Collectors.toMap(tp -> tp, tp -> spec));
+        Map<TopicPartition, Long> offsets = new HashMap<>();
+        esperar(adminClient.listOffsets(consulta).all()).forEach((tp, info) -> offsets.put(tp, info.offset()));
+        return offsets;
     }
 
     private Config leerConfig(String nombre) {
