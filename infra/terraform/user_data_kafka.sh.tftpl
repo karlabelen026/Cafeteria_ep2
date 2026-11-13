@@ -51,11 +51,14 @@ fi
 chown -R ubuntu:ubuntu "$APP_DIR"
 
 # ── .env: cada broker se anuncia con la IP privada de esta EC2, que no cambia
-# al detener/iniciar la instancia. ────────────────────────────────────────────
+# al detener/iniciar la instancia. Kafka UI pide el mismo usuario y clave que
+# el panel de RabbitMQ. ───────────────────────────────────────────────────────
 KAFKA_HOST_IP=$(hostname -I | awk '{print $1}')
 cat > "$APP_DIR/.env" <<ENV_EOF
 # Generado por Terraform (infra/terraform/user_data_kafka.sh.tftpl).
 KAFKA_HOST_IP=$KAFKA_HOST_IP
+KAFKA_UI_USER=cafeteria
+KAFKA_UI_PASSWORD=${kafka_ui_password}
 ENV_EOF
 chown ubuntu:ubuntu "$APP_DIR/.env"
 chmod 600 "$APP_DIR/.env"

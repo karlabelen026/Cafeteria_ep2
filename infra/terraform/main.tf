@@ -73,11 +73,12 @@ resource "aws_security_group" "backend" {
   }
 }
 
-# Kafka y RabbitMQ solo aceptan trafico de los microservicios (SG de backend),
-# nunca de internet. Las UIs de administracion quedan abiertas solo a mi IP.
+# Los brokers de Kafka y RabbitMQ solo aceptan trafico de los microservicios
+# (SG de backend), nunca de internet. Las UIs de administracion se abren a
+# ui_allowed_cidrs (por defecto cualquier IP) y piden usuario y clave.
 resource "aws_security_group" "kafka" {
   name        = "cafeteria360-kafka-sg"
-  description = "CafeGestion360 Kafka (3 brokers + Kafka UI): brokers solo desde el backend; SSH y Kafka UI solo desde mi IP"
+  description = "CafeGestion360 Kafka (3 brokers + Kafka UI): brokers solo desde el backend; Kafka UI con login; SSH solo desde mi IP"
 
   ingress {
     description = "SSH"
@@ -88,11 +89,11 @@ resource "aws_security_group" "kafka" {
   }
 
   ingress {
-    description = "Kafka UI"
+    description = "Kafka UI (pide usuario y clave)"
     from_port   = 8095
     to_port     = 8095
     protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
+    cidr_blocks = var.ui_allowed_cidrs
   }
 
   ingress {
@@ -117,7 +118,10 @@ resource "aws_security_group" "kafka" {
 }
 
 resource "aws_security_group" "rabbitmq" {
-  name        = "cafeteria360-rabbitmq-sg"
+  name = "cafeteria360-rabbitmq-sg"
+  # La descripcion no se puede cambiar sin reemplazar el SG (y AWS no deja
+  # borrarlo mientras la EC2 lo usa): se deja la original aunque el management
+  # ya se abra a ui_allowed_cidrs (ver la regla de 15672).
   description = "CafeGestion360 RabbitMQ (3 nodos): AMQP solo desde el backend; SSH y management desde mi IP"
 
   ingress {
@@ -129,11 +133,11 @@ resource "aws_security_group" "rabbitmq" {
   }
 
   ingress {
-    description = "RabbitMQ management UI (nodo 1)"
+    description = "RabbitMQ management UI (nodo 1, pide usuario y clave)"
     from_port   = 15672
     to_port     = 15672
     protocol    = "tcp"
-    cidr_blocks = [var.my_ip_cidr]
+    cidr_blocks = var.ui_allowed_cidrs
   }
 
   ingress {
@@ -265,8 +269,9 @@ resource "aws_instance" "kafka" {
   }
 
   user_data = templatefile("${path.module}/user_data_kafka.sh.tftpl", {
-    repo_url    = var.repo_url
-    repo_branch = var.repo_branch
+    repo_url          = var.repo_url
+    repo_branch       = var.repo_branch
+    kafka_ui_password = var.rabbitmq_password
   })
 
   tags = {

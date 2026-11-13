@@ -136,8 +136,9 @@ services:
     volumes:
       - kafka_3_data:/var/lib/kafka/data
 
-  # Topics, particiones/replicas, consumer groups y lag. El Security Group solo
-  # abre el 8095 a my_ip_cidr.
+  # Topics, particiones/replicas, consumer groups y lag. El 8095 queda abierto
+  # a ui_allowed_cidrs (por defecto, cualquier IP), asi que pide usuario y
+  # clave: sin login, cualquiera podria crear o borrar topics.
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui
@@ -149,6 +150,9 @@ services:
       KAFKA_CLUSTERS_0_NAME: cafeteria
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
       JAVA_OPTS: "-Xms64m -Xmx256m"
+      AUTH_TYPE: LOGIN_FORM
+      SPRING_SECURITY_USER_NAME: ${KAFKA_UI_USER:-cafeteria}
+      SPRING_SECURITY_USER_PASSWORD: ${KAFKA_UI_PASSWORD:?Falta KAFKA_UI_PASSWORD en .env}
     depends_on:
       kafka-1:
         condition: service_healthy
