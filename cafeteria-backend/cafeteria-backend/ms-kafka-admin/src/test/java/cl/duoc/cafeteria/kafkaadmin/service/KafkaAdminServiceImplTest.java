@@ -4,24 +4,31 @@ import cl.duoc.cafeteria.kafkaadmin.config.KafkaAdminProperties;
 import cl.duoc.cafeteria.kafkaadmin.dto.AddPartitionsRequest;
 import cl.duoc.cafeteria.kafkaadmin.dto.ConsumerGroupDetailResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.CreateTopicRequest;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsRequest;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.UpdateTopicConfigRequest;
 import cl.duoc.cafeteria.kafkaadmin.exception.ConflictoDeNegocioException;
 import cl.duoc.cafeteria.kafkaadmin.exception.RecursoNoEncontradoException;
 import cl.duoc.cafeteria.kafkaadmin.exception.ServicioNoDisponibleException;
 import cl.duoc.cafeteria.kafkaadmin.exception.SolicitudInvalidaException;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AlterConsumerGroupOffsetsResult;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.DescribeConsumerGroupsResult;
+import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsResult;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.ConsumerGroupState;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.TopicExistsException;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +40,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,6 +49,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -188,6 +199,97 @@ class KafkaAdminServiceImplTest {
         assertThat(detalle.offsets().get(0).lag()).isEqualTo(10);
         assertThat(detalle.offsets().get(1).lag()).isZero();
         assertThat(detalle.coordinator()).isEqualTo(1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void resetearOffsets_aEarliest_dejaCadaParticionAlInicioYDevuelveElAnterior() {
+        grupoConEstado("reportes-tiempo-real", ConsumerGroupState.EMPTY);
+        topicConParticiones("cafeteria.pagos.transacciones", 2);
+        TopicPartition p0 = new TopicPartition("cafeteria.pagos.transacciones", 0);
+        TopicPartition p1 = new TopicPartition("cafeteria.pagos.transacciones", 1);
+
+        ListOffsetsResult inicio = mock(ListOffsetsResult.class);
+        when(inicio.all()).thenReturn(KafkaFuture.completedFuture(Map.of(
+                p0, new ListOffsetsResult.ListOffsetsResultInfo(0, 0L, Optional.empty()),
+                p1, new ListOffsetsResult.ListOffsetsResultInfo(0, 0L, Optional.empty()))));
+        when(adminClient.listOffsets(anyMap())).thenReturn(inicio);
+
+        ListConsumerGroupOffsetsResult confirmados = mock(ListConsumerGroupOffsetsResult.class);
+        when(confirmados.partitionsToOffsetAndMetadata())
+                .thenReturn(KafkaFuture.completedFuture(Map.of(p0, new OffsetAndMetadata(12))));
+        when(adminClient.listConsumerGroupOffsets(anyString())).thenReturn(confirmados);
+
+        AlterConsumerGroupOffsetsResult alterado = mock(AlterConsumerGroupOffsetsResult.class);
+        when(alterado.all()).thenReturn(KafkaFuture.completedFuture(null));
+        when(adminClient.alterConsumerGroupOffsets(eq("reportes-tiempo-real"), anyMap())).thenReturn(alterado);
+
+        ResetOffsetsResponse respuesta = service.resetearOffsets("reportes-tiempo-real", new ResetOffsetsRequest(
+                "cafeteria.pagos.transacciones", ResetOffsetsRequest.DestinoOffset.EARLIEST, null));
+
+        ArgumentCaptor<Map<TopicPartition, OffsetAndMetadata>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(adminClient).alterConsumerGroupOffsets(eq("reportes-tiempo-real"), captor.capture());
+        assertThat(captor.getValue()).containsEntry(p0, new OffsetAndMetadata(0)).containsEntry(p1, new OffsetAndMetadata(0));
+        assertThat(respuesta.to()).isEqualTo("EARLIEST");
+        assertThat(respuesta.particiones()).hasSize(2);
+        assertThat(respuesta.particiones().get(0).offsetAnterior()).isEqualTo(12L);
+        assertThat(respuesta.particiones().get(0).offsetNuevo()).isZero();
+        assertThat(respuesta.particiones().get(1).offsetAnterior()).isNull();
+    }
+
+    @Test
+    void resetearOffsets_grupoConConsumidoresActivos_lanzaConflictoSinTocarOffsets() {
+        grupoConEstado("reportes-tiempo-real", ConsumerGroupState.STABLE);
+
+        assertThatThrownBy(() -> service.resetearOffsets("reportes-tiempo-real", new ResetOffsetsRequest(
+                "cafeteria.pagos.transacciones", ResetOffsetsRequest.DestinoOffset.EARLIEST, null)))
+                .isInstanceOf(ConflictoDeNegocioException.class)
+                .hasMessageContaining("Detén los consumidores");
+        verify(adminClient, never()).alterConsumerGroupOffsets(anyString(), anyMap());
+    }
+
+    @Test
+    void resetearOffsets_grupoInexistente_lanzaNoEncontrado() {
+        grupoConEstado("fantasma", ConsumerGroupState.DEAD);
+
+        assertThatThrownBy(() -> service.resetearOffsets("fantasma", new ResetOffsetsRequest(
+                "cafeteria.pagos.transacciones", ResetOffsetsRequest.DestinoOffset.LATEST, null)))
+                .isInstanceOf(RecursoNoEncontradoException.class);
+    }
+
+    @Test
+    void resetearOffsets_topicInexistente_lanzaNoEncontrado() {
+        grupoConEstado("reportes-tiempo-real", ConsumerGroupState.EMPTY);
+        KafkaFutureImpl<Map<String, TopicDescription>> falla = new KafkaFutureImpl<>();
+        falla.completeExceptionally(new UnknownTopicOrPartitionException("no existe"));
+        DescribeTopicsResult resultado = mock(DescribeTopicsResult.class);
+        when(resultado.allTopicNames()).thenReturn(falla);
+        when(adminClient.describeTopics(anyCollection())).thenReturn(resultado);
+
+        assertThatThrownBy(() -> service.resetearOffsets("reportes-tiempo-real", new ResetOffsetsRequest(
+                "no.existe", ResetOffsetsRequest.DestinoOffset.EARLIEST, null)))
+                .isInstanceOf(RecursoNoEncontradoException.class);
+        verify(adminClient, never()).alterConsumerGroupOffsets(anyString(), anyMap());
+    }
+
+    @Test
+    void resetearOffsets_timestampSinFecha_lanzaSolicitudInvalidaSinLlamarAKafka() {
+        assertThatThrownBy(() -> service.resetearOffsets("reportes-tiempo-real", new ResetOffsetsRequest(
+                "cafeteria.pagos.transacciones", ResetOffsetsRequest.DestinoOffset.TIMESTAMP, null)))
+                .isInstanceOf(SolicitudInvalidaException.class)
+                .hasMessageContaining("timestamp");
+        verifyNoInteractions(adminClient);
+    }
+
+    private void topicConParticiones(String nombre, int total) {
+        Node broker = new Node(1, "kafka-1", 29092);
+        List<TopicPartitionInfo> particiones = IntStream.range(0, total)
+                .mapToObj(i -> new TopicPartitionInfo(i, broker, List.of(broker), List.of(broker)))
+                .toList();
+        DescribeTopicsResult resultado = mock(DescribeTopicsResult.class);
+        when(resultado.allTopicNames()).thenReturn(KafkaFuture.completedFuture(
+                Map.of(nombre, new TopicDescription(nombre, false, particiones))));
+        when(adminClient.describeTopics(anyCollection())).thenReturn(resultado);
     }
 
     private void grupoConEstado(String groupId, ConsumerGroupState estado) {

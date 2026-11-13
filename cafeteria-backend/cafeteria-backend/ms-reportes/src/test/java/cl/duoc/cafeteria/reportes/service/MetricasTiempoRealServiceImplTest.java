@@ -131,6 +131,20 @@ class MetricasTiempoRealServiceImplTest {
     }
 
     @Test
+    void metricas_aprobadaSinMetodoPago_seAgrupaComoDesconocidoSinFallar() {
+        when(repository.findByOcurridoEnGreaterThanEqual(any())).thenReturn(List.of(
+                registro(AHORA.minusSeconds(10), 2500, null, true, 50),
+                registro(AHORA.minusSeconds(5), 1500, "DEBITO", true, 50)));
+
+        MetricasTiempoRealResponse m = service.metricas(5);
+
+        assertThat(m.montoAprobadoPorMetodo())
+                .containsEntry("DESCONOCIDO", 2500.0)
+                .containsEntry("DEBITO", 1500.0);
+        assertThat(m.montoAprobado()).isEqualTo(4000);
+    }
+
+    @Test
     void metricas_ventanaVacia_devuelveCerosYUnPuntoPorMinuto() {
         when(repository.findByOcurridoEnGreaterThanEqual(any())).thenReturn(List.of());
 

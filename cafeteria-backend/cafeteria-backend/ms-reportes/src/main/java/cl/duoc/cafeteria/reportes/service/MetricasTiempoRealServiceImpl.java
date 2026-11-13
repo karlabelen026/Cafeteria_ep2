@@ -20,6 +20,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 
 @Service
@@ -29,6 +30,9 @@ public class MetricasTiempoRealServiceImpl implements MetricasTiempoRealService 
 
     private static final int MINUTOS_MAXIMOS = 1440;
     private static final int LIMITE_MAXIMO = 200;
+    // ms-pagos solo valida el formato de metodoPago (@Pattern), no que venga:
+    // un null como clave haria fallar el TreeMap del desglose por metodo.
+    private static final String METODO_DESCONOCIDO = "DESCONOCIDO";
 
     private final AuditoriaTransaccionRepository repository;
     private final Clock clock;
@@ -97,7 +101,8 @@ public class MetricasTiempoRealServiceImpl implements MetricasTiempoRealService 
             if (t.isAprobado()) {
                 aprobadas++;
                 montoAprobado += t.getMonto();
-                porMetodo.merge(t.getMetodoPago(), t.getMonto(), Double::sum);
+                porMetodo.merge(Objects.requireNonNullElse(t.getMetodoPago(), METODO_DESCONOCIDO), t.getMonto(),
+                        Double::sum);
                 if (conteo != null) {
                     conteo[1]++;
                     montoPorMinuto.merge(minuto, t.getMonto(), Double::sum);

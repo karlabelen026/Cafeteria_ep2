@@ -657,7 +657,7 @@ Documenta en infra/terraform/README.md.
 ### Fase 7: Pruebas, evidencias y documentación
 ```
 Lee docs/EP2_PLAN.md y ejecuta la FASE 7 (sección 11):
-1) Colección Postman docs/postman/CafeGestion360_EP2.postman_collection.json + environment de ejemplo
+1) Colección Postman docs/postman/CafeGestion360_EP3.postman_collection.json + environment de ejemplo
    con TODAS las pruebas de la sección 11 (con tests de status code).
 2) Script scripts/smoke-test.sh que con curl recorre: productos públicos, checkout, seguimiento hasta PAGADO,
    tarjeta 9999 hasta DLQ, y los endpoints del admin de RabbitMQ.

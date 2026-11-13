@@ -11,6 +11,8 @@
 #   ./scripts/kafka-topics.sh eliminar <topic>
 #   ./scripts/kafka-topics.sh grupos
 #   ./scripts/kafka-topics.sh grupo <group-id>                  # miembros, offsets y lag
+#   ./scripts/kafka-topics.sh reset <group-id> <topic> [--to-earliest|--to-latest]
+#                                     # mueve los offsets (por defecto al inicio: replay); el grupo debe estar detenido
 set -euo pipefail
 
 BOOTSTRAP="kafka-1:29092,kafka-2:29092,kafka-3:29092"
@@ -33,5 +35,6 @@ case "$accion" in
     eliminar)    kafka kafka-topics --delete --topic "$1" ;;
     grupos)      kafka kafka-consumer-groups --list ;;
     grupo)       kafka kafka-consumer-groups --describe --group "$1" ;;
-    *)           sed -n '2,13p' "$0"; exit 1 ;;
+    reset)       kafka kafka-consumer-groups --reset-offsets --group "$1" --topic "$2" "${3:---to-earliest}" --execute ;;
+    *)           sed -n '2,15p' "$0"; exit 1 ;;
 esac

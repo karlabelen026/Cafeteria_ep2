@@ -5,6 +5,8 @@ import cl.duoc.cafeteria.kafkaadmin.dto.ClusterResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.ConsumerGroupDetailResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.ConsumerGroupResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.CreateTopicRequest;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsRequest;
+import cl.duoc.cafeteria.kafkaadmin.dto.ResetOffsetsResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.TopicDetailResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.TopicResponse;
 import cl.duoc.cafeteria.kafkaadmin.dto.UpdateTopicConfigRequest;
@@ -34,6 +36,9 @@ public interface KafkaAdminService {
     ConsumerGroupDetailResponse obtenerGrupo(String groupId);
 
     void eliminarGrupo(String groupId);
+
+    /** Mueve los offsets de un grupo sin consumidores activos (replay o saltar pendientes). */
+    ResetOffsetsResponse resetearOffsets(String groupId, ResetOffsetsRequest request);
 
     ClusterResponse estadoCluster();
 }
