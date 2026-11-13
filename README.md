@@ -600,7 +600,7 @@ curl -X POST http://localhost:8080/api/public/checkout -H "Content-Type: applica
 #   GET /api/public/tickets/{codigo}   boleta
 ```
 
-Colección de Postman: [`docs/postman`](docs/postman).
+Colección de Postman: [`docs/postman`](docs/postman) — `CafeGestion360_EP3.postman_collection.json` y su environment `CafeGestion360_EP3.postman_environment.json` (incluye las carpetas de Kafka: antifraude, administración con reset de offsets y reportería en tiempo real).
 
 ---
 
